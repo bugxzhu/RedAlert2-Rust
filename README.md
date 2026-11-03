@@ -13,6 +13,13 @@
     RA2_ASSETS_DIR="E:\hongjing\Reunion 2023" cargo test --workspace -- --ignored
                                            # 真实资产集成测试(本地)
 
+## 格式层(M1b)
+
+`ra2-core::format` 现可解析:MIX(明文/SHA-1 摘要位索引;加密位明确拒绝)、
+INI、PAL、SHP(TS/RA2,RLEZeroTS)、TMP(RA2 剧场布局)、CSF、
+AUD(IMA ADPCM,XCC 变体步长表)、VXL、HVA。
+规格依据见 `docs/superpowers/research/`,实施计划见 `docs/superpowers/plans/`。
+
 ## ra2-mix
 
     ra2-mix list <file.mix>
