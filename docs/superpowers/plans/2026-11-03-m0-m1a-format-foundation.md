@@ -1462,7 +1462,7 @@ fn write_out(mix: &MixArchive, name: &str, to_dir: Option<&str>) -> ExitCode {
 - [ ] **Step 4: 运行全部测试通过**
 
 Run: `cargo test --workspace`
-Expected: 单元+CLI 测试全绿(ignored 的 4 个除外)
+Expected: 单元+CLI 测试全绿(ignored 的 5 个除外:Task 5 的 4 个 + Task 6 的 rulesmd 集成)
 
 - [ ] **Step 5: 真实资产手工验收**
 
