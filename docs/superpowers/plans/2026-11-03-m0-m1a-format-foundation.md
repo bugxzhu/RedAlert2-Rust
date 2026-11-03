@@ -409,7 +409,7 @@ mod tests {
     #[test]
     fn remainder_bytes_fold_on_finish() {
         // 手算:RULESMD.INI -> 0x72033E38
-        // 该向量由算法手推;最终裁决是集成测试(ra2md.mix 中必须找到 rulesmd.ini)
+        // 该向量由算法手推;最终裁决是三库 LMD 76/76 集成测试(见 Task 5)
         assert_eq!(westwood_crc(b"RULESMD.INI"), 0x7203_3E38);
     }
 
@@ -1161,12 +1161,14 @@ Expected: 4 passed
 - [ ] **Step 5: 集成测试追加 rulesmd 断言(`tests/mix_integration.rs` 末尾)**
 
 ```rust
-/// 从 ra2md.mix 提取 rulesmd.ini 并解析(MIX+INI 联合裁决)。
+/// 从 expandmd01.mix 提取 rulesmd.ini 并解析(MIX+INI 联合裁决)。
+/// 修正(2026-11-03):原写 ra2md.mix 系笔误——rulesmd.ini 位于 expandmd01.mix
+/// (见 Task 5 集成测试与 Task 3 修正块;ra2md.mix 的 LMD 26 名单不含 rulesmd.ini)。
 #[test]
 #[ignore]
 fn rulesmd_ini_parses_from_mix() {
     use ra2_core::format::ini::IniDocument;
-    let mix = load("ra2md.mix");
+    let mix = load("expandmd01.mix");
     let text = std::str::from_utf8(mix.read("rulesmd.ini").expect("提取 rulesmd.ini"))
         .expect("rulesmd.ini 应为 UTF-8/ASCII 文本");
     let doc = IniDocument::parse(text);
@@ -1179,7 +1181,7 @@ fn rulesmd_ini_parses_from_mix() {
 ```
 
 Run: `RA2_ASSETS_DIR="E:\hongjing\Reunion 2023" cargo test -p ra2-core -- --ignored`
-Expected: 4 passed
+Expected: 5 passed(Task 5 的 4 个 + 本测试)
 
 - [ ] **Step 6: Commit**
 
@@ -1467,7 +1469,7 @@ Expected: 单元+CLI 测试全绿(ignored 的 4 个除外)
 ```bash
 cargo run --release -p ra2-mix -- list "E:\hongjing\Reunion 2023\ares.mix"
 # 期望:4 行,第一行 8F96AFF1 0 1760
-cargo run --release -p ra2-mix -- extract "E:\hongjing\Reunion 2023\ra2md.mix" rulesmd.ini -o fixtures
+cargo run --release -p ra2-mix -- extract "E:\hongjing\Reunion 2023\expandmd01.mix" rulesmd.ini -o fixtures
 # 期望:已写入 fixtures\rulesmd.ini
 head -5 fixtures/rulesmd.ini
 # 期望:rulesmd.ini 文本内容(注释/节名)
