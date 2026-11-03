@@ -436,3 +436,73 @@ fn aud_text1_ima_decode() {
     assert_eq!(aud.samples.iter().copied().max(), Some(17293));
     assert_eq!(aud.samples.iter().copied().min(), Some(-11630));
 }
+
+/// 1tnkbarl.vxl:1 节 BARREL01,9x2x2,18 列(4 空),28 体素;
+/// span j=0 原始字节 00 02 39 0F 39 22 02(研究文档 §3 逐字节);
+/// 尾部 rest-pose 变换非零、scale=1/12、调色板端点 (255,0,246)/(255,0,255)。
+#[test]
+#[ignore]
+fn vxl_1tnkbarl_single_section() {
+    use ra2_core::format::vxl::{VxlFile, VxlVoxel};
+    let data = ensure_sample(
+        &["ra2.mix", "local.mix"],
+        "1tnkbarl.vxl",
+        "f45b93d65a2774fc",
+    );
+    assert_eq!(data.len(), 1164);
+    let vxl = VxlFile::parse(&data).unwrap();
+    assert_eq!(vxl.sections.len(), 1);
+    let s = &vxl.sections[0];
+    assert_eq!(s.name, "BARREL01");
+    assert_eq!(s.dims, [9, 2, 2]);
+    assert_eq!(s.normal_type, 2);
+    assert_eq!(s.columns.len(), 18);
+    assert_eq!(s.columns.iter().filter(|c| c.voxels.is_empty()).count(), 4);
+    let total: usize = s.columns.iter().map(|c| c.voxels.len()).sum();
+    assert_eq!(total, 28);
+    assert_eq!(
+        s.columns[0].voxels,
+        [
+            VxlVoxel {
+                z: 0,
+                color: 0x39,
+                normal: 15
+            },
+            VxlVoxel {
+                z: 1,
+                color: 0x39,
+                normal: 34
+            }
+        ]
+    );
+    assert!(s.columns[5].voxels.is_empty());
+    assert!(s.columns[6].voxels.is_empty());
+    assert!((s.scale - 1.0 / 12.0).abs() < 1e-6);
+    assert_eq!(vxl.palette[0], [255, 0, 246]);
+    assert_eq!(vxl.palette[255], [255, 0, 255]);
+    // 尾部静止姿态(2026-11-03 精确取证):非零平移
+    assert!((s.transform[0][3] - 0.169_375_33).abs() < 1e-6);
+    assert!((s.transform[1][3] - (-1.730_145)).abs() < 1e-5);
+    assert!((s.transform[2][3] - 11.604_487).abs() < 1e-5);
+    assert!((s.min[0] - 3.816_355_5).abs() < 1e-5);
+    assert!((s.max[0] - 12.707_98).abs() < 1e-5);
+}
+
+/// 1tnk.vxl:1 节 B-BODY,31x15x11,465 列(14 空),2227 体素。
+#[test]
+#[ignore]
+fn vxl_1tnk_465_spans_2227_voxels() {
+    use ra2_core::format::vxl::VxlFile;
+    let data = ensure_sample(&["ra2.mix", "local.mix"], "1tnk.vxl", "45e3bb0e6413589f");
+    assert_eq!(data.len(), 12537);
+    let vxl = VxlFile::parse(&data).unwrap();
+    assert_eq!(vxl.sections.len(), 1);
+    let s = &vxl.sections[0];
+    assert_eq!(s.name, "B-BODY");
+    assert_eq!(s.dims, [31, 15, 11]);
+    assert_eq!(s.columns.len(), 465);
+    assert_eq!(s.columns.iter().filter(|c| c.voxels.is_empty()).count(), 14);
+    let total: usize = s.columns.iter().map(|c| c.voxels.len()).sum();
+    assert_eq!(total, 2227);
+    assert!((s.scale - 1.0 / 12.0).abs() < 1e-6);
+}
