@@ -10,6 +10,7 @@ pub mod mix;
 pub mod pal;
 pub mod rle_zero_ts;
 pub mod shp;
+pub mod tmp;
 
 use std::fmt;
 

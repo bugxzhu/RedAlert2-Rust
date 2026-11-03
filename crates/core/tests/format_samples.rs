@@ -295,3 +295,85 @@ fn shp_gunfirey_empty_and_shadow_frames() {
     assert_eq!(shp.frames[7].header.rgb, [0, 0, 0]); // 阴影帧(位置配对留给 view 层)
     assert_eq!(shp.frames[7].pixels.len(), 94 * 94);
 }
+
+/// burnt01.sno:120x120 画布,2 项(1 图形 29x17 灼痕 + 1 空)。
+/// 像素向量:343 个非零;首 16 像素 = 10 零 + b3 b7 bb 00 00 b4(2026-11-03 取证)。
+#[test]
+#[ignore]
+fn tmp_burnt01_sno_blob() {
+    use ra2_core::format::tmp::TmpRa2File;
+    let data = ensure_sample(&["ra2.mix", "snow.mix"], "burnt01.sno", "bc1a23700e17563f");
+    assert_eq!(data.len(), 520);
+    let tmp = TmpRa2File::parse(&data).unwrap();
+    assert_eq!((tmp.width, tmp.height), (120, 120));
+    assert_eq!(tmp.tiles.len(), 2);
+    let t0 = &tmp.tiles[0];
+    assert_eq!(
+        (t0.header.x, t0.header.y, t0.header.cx, t0.header.cy),
+        (44, 64, 29, 17)
+    );
+    assert_eq!(t0.header.unknown_a, 3);
+    assert_eq!(t0.header.unknown_d, 1);
+    assert_eq!(t0.header.radar, [0, 0, 0]);
+    assert_eq!(t0.header.data_offset, 56);
+    assert_eq!(t0.pixels.len(), 29 * 17);
+    assert_eq!(t0.pixels.iter().filter(|&&p| p != 0).count(), 343);
+    assert_eq!(
+        &t0.pixels[..16],
+        &[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xB3, 0xB7, 0xBB, 0, 0, 0xB4]
+    );
+    let t1 = &tmp.tiles[1];
+    assert_eq!(
+        (t1.header.cx, t1.header.cy, t1.header.data_offset),
+        (0, 0, 0)
+    );
+    assert!(t1.pixels.is_empty());
+}
+
+/// lobrdb08.sno:180x120 画布,6 项(1 图形 120x69 菱形 + 5 空);t0 带小地图绿。
+#[test]
+#[ignore]
+fn tmp_lobrdb08_sno_diamond() {
+    use ra2_core::format::tmp::TmpRa2File;
+    let data = ensure_sample(&["ra2.mix", "snow.mix"], "lobrdb08.sno", "7a1309fc8c192d82");
+    assert_eq!(data.len(), 3360);
+    let tmp = TmpRa2File::parse(&data).unwrap();
+    assert_eq!((tmp.width, tmp.height), (180, 120));
+    assert_eq!(tmp.tiles.len(), 6);
+    let t0 = &tmp.tiles[0];
+    assert_eq!(
+        (t0.header.cx, t0.header.cy, t0.header.data_offset),
+        (0, 0, 0)
+    );
+    assert_eq!(t0.header.unknown_a, 4);
+    assert_eq!(t0.header.radar, [0x00, 0xFB, 0x12]); // 小地图亮绿
+    let t1 = &tmp.tiles[1];
+    assert_eq!(
+        (t1.header.x, t1.header.y, t1.header.cx, t1.header.cy),
+        (30, 20, 120, 69)
+    );
+    assert_eq!(t1.header.unknown_a, 3);
+    assert_eq!(t1.header.unknown_d, 6);
+    assert_eq!(t1.header.data_offset, 152);
+    assert_eq!(t1.pixels.len(), 120 * 69);
+    assert_eq!(t1.pixels.iter().filter(|&&p| p != 0).count(), 2788);
+    for t in &tmp.tiles[2..] {
+        assert!(t.pixels.is_empty());
+    }
+}
+
+/// 真库甲骨文:直接从 ra2.mix → snow.mix 按名提取瓦片(该库有 LMD,名单含
+/// 全部 .sno 瓦片;研究文档的两个样本即出自此库)。
+/// 注:任务骨架原想从摘要位剧场库(isourbmd 等)取瓦片,但实测 38 个摘要位
+/// 嵌套库全部无 LMD、其条目也不符合已验证的 RA2 TMP 布局(计划规格依据 §4);
+/// 摘要位链路由 Task 1 与 Task 10 的容器层测试覆盖。
+#[test]
+#[ignore]
+fn tmp_tile_reads_by_name_from_snow_mix() {
+    use ra2_core::format::tmp::TmpRa2File;
+    let data = read_from_chain(&["ra2.mix", "snow.mix"], "burnt01.sno");
+    assert_eq!(sha16(&data), "bc1a23700e17563f");
+    let tmp = TmpRa2File::parse(&data).unwrap();
+    assert_eq!(tmp.tiles.len(), 2);
+    assert_eq!(tmp.tiles[0].pixels.len(), 29 * 17);
+}
