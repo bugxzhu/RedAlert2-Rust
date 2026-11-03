@@ -8,6 +8,8 @@ pub mod ini;
 pub mod lcw;
 pub mod mix;
 pub mod pal;
+pub mod rle_zero_ts;
+pub mod shp;
 
 use std::fmt;
 

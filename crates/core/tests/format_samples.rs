@@ -201,3 +201,97 @@ fn extract_standard_samples_and_verify_oracle_hashes() {
         assert_eq!(sha16(&data), *sha);
     }
 }
+
+/// pwrlvl.shp:最小 1 帧未压缩 SHP(研究文档 §1.5 逐字节验证)。
+/// 像素:fe×10 00×4 fe×2(16 字节,帧内嵌 4 个透明像素)。
+/// (brief/研究文档原文 fe×9+fe×3 系笔误;已按哈希钉死样本的原始字节改正)
+#[test]
+#[ignore]
+fn shp_pwrlvl_minimal_uncompressed() {
+    use ra2_core::format::shp::ShpFile;
+    let data = ensure_sample(
+        &["ra2.mix", "sidec01.mix"],
+        "pwrlvl.shp",
+        "e0837c1520ff9538",
+    );
+    assert_eq!(data.len(), 48);
+    let shp = ShpFile::parse(&data).unwrap();
+    assert_eq!((shp.cx, shp.cy), (8, 2));
+    assert_eq!(shp.frames.len(), 1);
+    let f = &shp.frames[0];
+    assert_eq!(
+        (f.header.x, f.header.y, f.header.cx, f.header.cy),
+        (0, 0, 8, 2)
+    );
+    assert_eq!(f.header.flags, 1); // 仅 bit0;bit1 未置 → 未压缩
+    assert_eq!(f.header.offset, 32); // 8 + 24,恰在表尾
+    let mut expected = vec![0xFEu8; 10];
+    expected.extend_from_slice(&[0u8; 4]);
+    expected.extend_from_slice(&[0xFEu8; 2]);
+    assert_eq!(f.pixels, expected);
+}
+
+/// mindanimr.shp:8 帧全压缩(flags=3),偏移严格递增、帧行链后有 0 填充。
+#[test]
+#[ignore]
+fn shp_mindanimr_8_compressed_frames() {
+    use ra2_core::format::shp::ShpFile;
+    let data = ensure_sample(
+        &["ra2md.mix", "conqmd.mix"],
+        "mindanimr.shp",
+        "ef4617cf48248f0c",
+    );
+    assert_eq!(data.len(), 1144);
+    let shp = ShpFile::parse(&data).unwrap();
+    assert_eq!((shp.cx, shp.cy), (30, 22));
+    assert_eq!(shp.frames.len(), 8);
+    let expect = [
+        (7i16, 5i16, 14u16, 8u16, 0xC8u32),
+        (7, 5, 15, 9, 0x138),
+        (6, 5, 17, 9, 0x1C0),
+        (4, 4, 20, 11, 0x260),
+        (5, 4, 19, 11, 0x320),
+        (10, 7, 8, 5, 0x3B0),
+        (9, 6, 10, 6, 0x3E8),
+        (8, 6, 12, 7, 0x428),
+    ];
+    for (f, e) in shp.frames.iter().zip(expect) {
+        assert_eq!(
+            (
+                f.header.x,
+                f.header.y,
+                f.header.cx,
+                f.header.cy,
+                f.header.offset
+            ),
+            e
+        );
+        assert_eq!(f.header.flags, 3);
+        assert_eq!(f.pixels.len(), (e.2 as usize) * (e.3 as usize));
+    }
+}
+
+/// gunfirey.shp:8 帧含 3 个空帧(f4-f6)与按位置配对的阴影帧 f7(rgb 全黑)。
+#[test]
+#[ignore]
+fn shp_gunfirey_empty_and_shadow_frames() {
+    use ra2_core::format::shp::ShpFile;
+    let data = ensure_sample(
+        &["ra2md.mix", "conqmd.mix"],
+        "gunfirey.shp",
+        "4425f5bdf013e1a9",
+    );
+    assert_eq!(data.len(), 4000);
+    let shp = ShpFile::parse(&data).unwrap();
+    assert_eq!((shp.cx, shp.cy), (97, 94));
+    assert_eq!(shp.frames.len(), 8);
+    for i in 4..=6 {
+        let f = &shp.frames[i];
+        assert_eq!((f.header.cx, f.header.cy, f.header.offset), (0, 0, 0));
+        assert!(f.pixels.is_empty());
+        assert_eq!(f.header.flags, 3); // 空帧 flags 仍非 0——勿以 flags 判空
+    }
+    assert_eq!(shp.frames[0].pixels.len(), 97 * 90);
+    assert_eq!(shp.frames[7].header.rgb, [0, 0, 0]); // 阴影帧(位置配对留给 view 层)
+    assert_eq!(shp.frames[7].pixels.len(), 94 * 94);
+}
