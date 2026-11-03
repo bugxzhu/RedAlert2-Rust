@@ -238,7 +238,7 @@ mod tests {
 
     #[test]
     fn reads_little_endian_values() {
-        let data = [0x01, 0x02, 0x03, 0x04, 0xFF, 0x06, 0x07, 0x08];
+        let data = [0x01, 0x02, 0x03, 0xFF, 0x06, 0x07, 0x08];
         let mut r = ByteReader::new(&data);
         assert_eq!(r.read_u8().unwrap(), 0x01);
         assert_eq!(r.read_u16_le().unwrap(), 0x0302);
