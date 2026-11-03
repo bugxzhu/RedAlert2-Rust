@@ -377,3 +377,38 @@ fn tmp_tile_reads_by_name_from_snow_mix() {
     assert_eq!(tmp.tiles.len(), 2);
     assert_eq!(tmp.tiles[0].pixels.len(), 29 * 17);
 }
+
+/// ra2md.csf 全量走查(langmd.mix;研究文档 §1.4,2026-11-03 独立复验):
+/// 5280 标签 = 4076 'STR ' + 1204 'STRW';4 个空值标签;流恰在 EOF 结束。
+#[test]
+#[ignore]
+fn csf_ra2md_full_parse() {
+    use ra2_core::format::csf::CsfDocument;
+    let data = ensure_sample(&["langmd.mix"], "ra2md.csf", "8a0705c9694c4376");
+    assert_eq!(data.len(), 336_648);
+    let csf = CsfDocument::parse(&data).unwrap();
+    assert_eq!(csf.labels.len(), 5280);
+    let plain = csf
+        .labels
+        .iter()
+        .filter(|l| l.value.is_some() && l.extra.is_none())
+        .count();
+    let strw = csf.labels.iter().filter(|l| l.extra.is_some()).count();
+    let empty_value = csf
+        .labels
+        .iter()
+        .filter(|l| l.value.as_deref() == Some(""))
+        .count();
+    assert_eq!(plain, 4076); // 含 4 个空值('STR ' + cb_str=0)
+    assert_eq!(strw, 1204);
+    assert_eq!(empty_value, 4); // GUI:Blank / TXT_NONE / GUI:Empty / STT:Empty
+    let l0 = &csf.labels[0];
+    assert_eq!(l0.name, "THEME:Intro");
+    assert_eq!(l0.value.as_deref(), Some("开场"));
+    let vox = csf.find("VOX:ceva001").expect("应有 VOX:ceva001");
+    assert_eq!(vox.extra.as_deref(), Some(b"ceva001c".as_slice()));
+    assert_eq!(
+        vox.value.as_deref().map(|v| v.encode_utf16().count()),
+        Some(12)
+    );
+}
