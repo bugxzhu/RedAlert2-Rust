@@ -157,7 +157,7 @@ mod tests {
         b[4..6].copy_from_slice(&cx.to_le_bytes());
         b[6..8].copy_from_slice(&cy.to_le_bytes());
         b[8..12].copy_from_slice(&unknown_a.to_le_bytes());
-        // _b/_c 保持 0
+        // _b 保持 0
         b[14..16].copy_from_slice(&unknown_d.to_le_bytes());
         // radar/_pad 保持 0
         b[20..24].copy_from_slice(&offset.to_le_bytes());
