@@ -872,7 +872,7 @@ mod tests {
         let data = shp_bytes(
             (4, 2),
             &[
-                frame_header(0, 0, 2, 1, 1, 32),
+                frame_header(0, 0, 2, 1, 1, 56),
                 frame_header(0, 0, 0, 0, 3, 0),
             ],
             &body,
