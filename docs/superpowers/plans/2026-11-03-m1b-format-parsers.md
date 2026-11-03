@@ -2678,9 +2678,10 @@ impl HvaFile {
                 "HVA frames={frames} sections={sections},都必须 > 0"
             )));
         }
-        // 尺寸等式用 u64,防 u32 计数在 usize 上溢出
-        let expected = 24u64 + 16 * sections as u64 + 48 * frames as u64 * sections as u64;
-        if data.len() as u64 != expected {
+        // 尺寸等式用 u128:u64 也会被恶意 F/S 溢出(48*(2^32-1)^2 ≈ 8.85e20 超过
+        // u64::MAX,debug 溢出检查会 panic);u128 下任何 F/S 组合均无溢出。
+        let expected = 24u128 + 16 * sections as u128 + 48 * frames as u128 * sections as u128;
+        if data.len() as u128 != expected {
             return Err(FormatError::Invalid(format!(
                 "HVA 尺寸等式不符: 文件 {} 字节,应为 {expected}(F={frames}, S={sections})",
                 data.len()
@@ -2803,13 +2804,23 @@ mod tests {
             Err(FormatError::Invalid(_))
         ));
     }
+
+    #[test]
+    fn hostile_max_counts_report_invalid_not_panic() {
+        // 恶意 24 字节头:F=S=u32::MAX。48*F*S ≈ 8.85e20 溢出 u64——u128 等式
+        // 必须安静返回 Invalid,而不是在 debug 溢出检查下 panic(终审 Important 回归)。
+        let mut data = [0u8; 24];
+        data[16..20].copy_from_slice(&u32::MAX.to_le_bytes());
+        data[20..24].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert!(matches!(HvaFile::parse(&data), Err(FormatError::Invalid(_))));
+    }
 }
 ```
 
 - [ ] **Step 2: 运行单元测试通过**
 
 Run: `cargo test -p ra2-core hva`
-Expected: 4 passed
+Expected: 5 passed(含敌意 F/S 回归)
 
 - [ ] **Step 3: 追加真实资产测试(`crates/core/tests/format_samples.rs` 末尾)**
 
@@ -2872,7 +2883,7 @@ Expected: 2 passed(真实 2;单元 4 已由前步覆盖,--ignored 不重复运�
 - [ ] **Step 5: 全套回归后 Commit**
 
 Run: `cargo fmt --all && cargo clippy --all-targets -- -D warnings && cargo test --workspace`
-Expected: 合成 80 passed
+Expected: 合成 81 passed(80 + 敌意 F/S 回归)
 
 ```bash
 git add crates/core/
@@ -3181,7 +3192,7 @@ fn run(mix_path: &str, action: Action<'_>) -> ExitCode {
 - [ ] **Step 4: 运行全部测试通过**
 
 Run: `cargo test -p ra2-mix && cargo test --workspace`
-Expected: ra2-mix 6 passed;workspace 合成 84 passed
+Expected: ra2-mix 6 passed;workspace 合成 85 passed
 
 - [ ] **Step 5: BrokenPipe 手工验收(无法稳定自动化;Git Bash)**
 
@@ -3324,7 +3335,7 @@ AUD(IMA ADPCM,XCC 变体步长表)、VXL、HVA。
 - [ ] **Step 4: 全套终验**
 
 Run: `cargo fmt --all --check && cargo clippy --all-targets -- -D warnings && cargo test --workspace`
-Expected: 全绿;合成 84 passed
+Expected: 全绿;合成 85 passed
 
 Run: `RA2_ASSETS_DIR="E:\hongjing\Reunion 2023" cargo test --workspace -- --ignored`
 Expected: 21 passed(计划一 5 + 本计划 16)
@@ -3340,7 +3351,7 @@ git commit -m "test(core): M1b 全链路真实资产验收 + README 格式层说
 
 ## 完成定义(计划级验收)
 
-1. `cargo test --workspace` 全绿(84 个合成测试,含 6 个 CLI 测试);`RA2_ASSETS_DIR="E:\hongjing\Reunion 2023" cargo test --workspace -- --ignored` 全绿(21 个真实资产测试,含 17/17 哈希闭合的样本提取与全链路验收)。
+1. `cargo test --workspace` 全绿(85 个合成测试,含 6 个 CLI 测试与 1 个 HVA 敌意输入回归);`RA2_ASSETS_DIR="E:\hongjing\Reunion 2023" cargo test --workspace -- --ignored` 全绿(21 个真实资产测试,含 17/17 哈希闭合的样本提取与全链路验收)。
 2. `cargo fmt --all --check` 与 `cargo clippy --all-targets -- -D warnings` 零告警。
 3. 六类解析器对真实字节零 panic(单元 + 真实双覆盖;所有切片/索引显式边界检查)。
 4. 仓库不含任何 EA 资产(`fixtures/` 已忽略;`git ls-files` 审计通过)。
@@ -3363,7 +3374,7 @@ git commit -m "test(core): M1b 全链路真实资产验收 + README 格式层说
 - `rle_zero_ts_decode(src, cx, cy, out) -> Result<usize, FormatError>`:Task 3 定义,Task 4(SHP/TMP 双消费)签名一致 ✓
 - `ensure_sample/read_from_chain/sha16`:Task 2 定义,Task 3-8 调用签名一致 ✓
 - `FormatError` 三变体用途全计划统一(UnexpectedEof=截断,Unsupported=加密/立体声/WS/未知位/未知压缩,Invalid=结构畸形)✓
-- 计数核对:合成 84(29 core 既有 + 3 mix + 14 rle/shp + 6 tmp + 7 csf + 8 aud + 7 vxl + 4 hva + 6 cli)、ignored 21(5 既有 + 2 + 1 + 3 + 3 + 1 + 1 + 2 + 2 + 1)——与各任务 Run 步骤的期望值逐一相符 ✓
+- 计数核对:合成 85(29 core 既有 + 3 mix + 14 rle/shp + 6 tmp + 7 csf + 8 aud + 7 vxl + 5 hva + 6 cli)、ignored 21(5 既有 + 2 + 1 + 3 + 3 + 1 + 1 + 2 + 2 + 1)——与各任务 Run 步骤的期望值逐一相符 ✓
 - 摘要位语义翻转一处既有断言(计划一 `rejects_encrypted_index` 用 0x00010000)已在 Task 1 显式重写 ✓
 
 **范围守卫复核**:无 Blowfish、无 TS-TMP 变体、无渲染/上色、无 get_float、无 SHA-1 实现、无阴影帧配对——全部按 Global Constraints 排除并注明归属里程碑 ✓
