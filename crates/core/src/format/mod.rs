@@ -2,6 +2,8 @@
 
 //! 原版资产容器与数据格式解析。
 
+pub mod bytes;
+
 use std::fmt;
 
 /// 格式解析错误。
