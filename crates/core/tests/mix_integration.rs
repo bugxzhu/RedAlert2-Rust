@@ -3,6 +3,7 @@
 //! 运行:RA2_ASSETS_DIR="E:\hongjing\Reunion 2023" cargo test -p ra2-core -- --ignored
 
 use ra2_core::format::mix::MixArchive;
+use ra2_core::format::FormatError;
 
 fn assets_dir() -> std::path::PathBuf {
     std::env::var("RA2_ASSETS_DIR")
@@ -96,4 +97,54 @@ fn rulesmd_ini_parses_from_mix() {
     assert!(doc.section("VehicleTypes").is_some());
     assert!(doc.section("BuildingTypes").is_some());
     assert!(doc.sections.len() > 100, "rulesmd.ini 应有大量节");
+}
+
+/// 真库裁决:ra2md.mix 内嵌的 isourbmd.mix(城市剧场库)flags=0x00010000,
+/// 索引后 20 字节摘要块、data_start += 20(body_size == 文件长-714 精确成立)。
+/// 实测 38 个摘要位嵌套库全部无 LMD,故按首条目 ID 读取(计划规格依据 §3)。
+/// 其 57 个条目内容不属于已验证的 RA2 TMP 布局(计划规格依据 §4),此处只裁决容器层。
+#[test]
+#[ignore]
+fn isourbmd_digest_mix_descends_and_reads_entry() {
+    let ra2md = load("ra2md.mix");
+    let blob = ra2md
+        .read("isourbmd.mix")
+        .expect("ra2md.mix 应含 isourbmd.mix(LMD 名单内有)");
+    assert_eq!(blob.len(), 5_198_826);
+    let iso = MixArchive::parse(blob.to_vec()).expect("摘要位应被接受");
+    assert_eq!(iso.entries().len(), 57);
+    assert_eq!(iso.entries()[0].id, 0x8CAA_79E6);
+    assert_eq!(iso.entries()[0].size, 1_757_768);
+    let first = iso.read_by_id(iso.entries()[0].id).unwrap();
+    assert_eq!(first.len(), 1_757_768);
+}
+
+/// 真库负样本:加密位/未知位的嵌套库必须明确报 Unsupported(计划规格依据 §8)。
+#[test]
+#[ignore]
+fn real_mixes_with_encrypted_or_unknown_flags_are_unsupported() {
+    let ra2md = load("ra2md.mix");
+    for (name, why) in [
+        ("loadmd.mix", "摘要+加密 0x00030000"),
+        ("sidec02md.mix", "Blowfish 加密 0x00020000"),
+    ] {
+        let blob = ra2md
+            .read(name)
+            .unwrap_or_else(|e| panic!("读 {name}: {e}"));
+        match MixArchive::parse(blob.to_vec()) {
+            Err(FormatError::Unsupported(_)) => {}
+            // MixArchive 未实现 Debug,故拆开两臂分别报告(Brief 原写法 {other:?} 无法编译)
+            Err(e) => panic!("{name}({why})应报 Unsupported,实际 {e:?}"),
+            Ok(_) => panic!("{name}({why})应报 Unsupported,实际得到 Ok"),
+        }
+    }
+    // 未知高位(非 digest/非加密)
+    let langmd = load("langmd.mix");
+    let audiomd = langmd
+        .read("audiomd.mix")
+        .expect("langmd.mix 应含 audiomd.mix");
+    assert!(matches!(
+        MixArchive::parse(audiomd.to_vec()),
+        Err(FormatError::Unsupported(_))
+    ));
 }

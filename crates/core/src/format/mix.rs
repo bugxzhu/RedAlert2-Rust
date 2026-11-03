@@ -13,10 +13,15 @@ pub struct MixEntry {
     pub size: u32,
 }
 
-/// TS/RA2 时代 MIX 容器(明文索引)。
+/// TS/RA2 时代 MIX 容器(明文索引或 SHA-1 摘要位索引)。
 ///
 /// 布局:`[u32 flags][u16 count][u32 body_size]` + count×12 字节索引项
-/// `{id, offset, size}`,随后是文件体;`data_start = 10 + count*12`。
+/// `{id, offset, size}`,随后(若 flags 含 0x00010000)是 20 字节摘要块,
+/// 然后是文件体;`data_start = 10 + count*12 (+ 20)`。
+/// flags 位语义(XCC mix_file.cpp:35-58;真库负样本见计划规格依据 §8):
+/// 0x00010000 = SHA-1 摘要位(本实现只跳过不校验——零依赖,不引入 SHA-1;
+/// 实测 isourbmd.mix 的摘要槽内容为结构化值 [1,1,60,30,20],见计划规格依据 §5);
+/// 0x00020000 = Blowfish 加密索引(拒绝);其余位未知(拒绝)。
 pub struct MixArchive {
     data: Vec<u8>,
     entries: Vec<MixEntry>,
@@ -25,13 +30,21 @@ pub struct MixArchive {
 
 impl MixArchive {
     pub fn parse(data: Vec<u8>) -> Result<Self, FormatError> {
+        const FLAG_SHA1_DIGEST: u32 = 0x0001_0000;
+        const FLAG_ENCRYPTED: u32 = 0x0002_0000;
         let mut r = ByteReader::new(&data);
         let flags = r.read_u32_le()?;
-        if flags != 0 {
+        if flags & FLAG_ENCRYPTED != 0 {
             return Err(FormatError::Unsupported(format!(
                 "加密 MIX 索引暂不支持 (flags=0x{flags:08X})"
             )));
         }
+        if flags & !(FLAG_SHA1_DIGEST | FLAG_ENCRYPTED) != 0 {
+            return Err(FormatError::Unsupported(format!(
+                "未知 MIX 标志位 (flags=0x{flags:08X})"
+            )));
+        }
+        let has_digest = flags & FLAG_SHA1_DIGEST != 0;
         let count = r.read_u16_le()? as usize;
         let _body_size = r.read_u32_le()?;
         let mut entries = Vec::with_capacity(count);
@@ -41,6 +54,11 @@ impl MixArchive {
                 offset: r.read_u32_le()?,
                 size: r.read_u32_le()?,
             });
+        }
+        if has_digest {
+            // SHA-1 摘要块:明文索引之后、数据体之前(XCC mix_file.cpp)。
+            // 只定位不校验——校验需要 SHA-1 实现,超出零依赖范围。
+            r.skip(20)?;
         }
         let data_start = r.position();
         for e in &entries {
@@ -111,6 +129,29 @@ mod tests {
         v
     }
 
+    /// 摘要位样本:flags=0x00010000,索引与数据体之间有 20 字节摘要块。
+    fn sample_digest_mix() -> Vec<u8> {
+        let id_hello = mix_name_id("HELLO");
+        let body: Vec<u8> = b"HELLO".to_vec();
+        let mut v = Vec::new();
+        v.extend_from_slice(&0x0001_0000u32.to_le_bytes()); // flags: 摘要位
+        v.extend_from_slice(&1u16.to_le_bytes()); // count
+        v.extend_from_slice(&(body.len() as u32).to_le_bytes()); // body_size
+        v.extend_from_slice(&id_hello.to_le_bytes());
+        v.extend_from_slice(&0u32.to_le_bytes());
+        v.extend_from_slice(&(body.len() as u32).to_le_bytes());
+        v.extend_from_slice(&[0xABu8; 20]); // 摘要块(内容不校验)
+        v.extend_from_slice(&body);
+        v
+    }
+
+    #[test]
+    fn accepts_sha1_digest_flag() {
+        let mix = MixArchive::parse(sample_digest_mix()).unwrap();
+        assert_eq!(mix.entries().len(), 1);
+        assert_eq!(mix.read("HELLO").unwrap(), b"HELLO");
+    }
+
     #[test]
     fn parses_header_and_index() {
         let mix = MixArchive::parse(sample_mix()).unwrap();
@@ -130,7 +171,28 @@ mod tests {
     #[test]
     fn rejects_encrypted_index() {
         let mut data = sample_mix();
-        data[0..4].copy_from_slice(&0x0001_0000u32.to_le_bytes());
+        data[0..4].copy_from_slice(&0x0002_0000u32.to_le_bytes());
+        assert!(matches!(
+            MixArchive::parse(data),
+            Err(FormatError::Unsupported(_))
+        ));
+    }
+
+    #[test]
+    fn rejects_digest_plus_encrypted() {
+        // 加密位优先裁决:0x00030000 报 Unsupported(加密分支)
+        let mut data = sample_mix();
+        data[0..4].copy_from_slice(&0x0003_0000u32.to_le_bytes());
+        assert!(matches!(
+            MixArchive::parse(data),
+            Err(FormatError::Unsupported(_))
+        ));
+    }
+
+    #[test]
+    fn rejects_unknown_flag_bits() {
+        let mut data = sample_mix();
+        data[0..4].copy_from_slice(&0x0004_0000u32.to_le_bytes());
         assert!(matches!(
             MixArchive::parse(data),
             Err(FormatError::Unsupported(_))
