@@ -7,6 +7,7 @@ pub mod crc;
 pub mod ini;
 pub mod lcw;
 pub mod mix;
+pub mod pal;
 
 use std::fmt;
 
