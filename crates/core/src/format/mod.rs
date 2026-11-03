@@ -5,6 +5,7 @@
 pub mod bytes;
 pub mod crc;
 pub mod lcw;
+pub mod mix;
 
 use std::fmt;
 
