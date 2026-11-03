@@ -114,7 +114,8 @@ Sample heads match the task's known-facts line for line.
 - table end = 8 + 24·1 = 32 = 0x20; f0.offset = 0x20 ✓ (data starts exactly after table)
 - f0: x=0 y=0 cx=8 cy=2 flags=0x1 rgb=(255,0,0) zero2=0 offset=0x20
 - uncompressed (bit1 clear): needs 8·2 = 16 B → 0x20+16 = 0x30 = 48 = file size ✓ **exact EOF fit**
-- pixels: `fe`×9 `00`×4 `fe`×3 (16 B) — 4 transparent pixels inside a 1-frame sprite
+- pixels: `fe`×10 `00`×4 `fe`×2 (16 B) — 4 transparent pixels inside a 1-frame sprite
+  (勘误 2026-11-04: 原记录 "`fe`×9 `00`×4 `fe`×3" 系转写笔误; 经哈希钉死样本直读复核为 `fe`×10 `00`×4 `fe`×2)
 
 **mindanimr.shp** (1144 B = 0x478) — `ef4617cf…`
 - hdr: zero=0, cx=30, cy=22, frames=8

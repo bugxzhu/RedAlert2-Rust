@@ -607,7 +607,7 @@ mod tests {
     #[test]
     fn zero_run_clamped_at_row_width() {
         // 编码器怪癖:行尾零游程多发 1(应写 3,实发 4)——截断到行宽
-        let src = [0x06, 0x00, b'A', 0x00, 0x04];
+        let src = [0x05, 0x00, b'A', 0x00, 0x04];
         assert_eq!(decode(&src, 4, 1).unwrap(), vec![b'A', 0, 0, 0]);
     }
 
@@ -620,7 +620,7 @@ mod tests {
     #[test]
     fn tokens_after_row_full_are_consumed() {
         // 零游程 5 → 截断为行宽 2;块内还剩一个字面量 'Z'——消耗但不输出
-        let src = [0x06, 0x00, 0x00, 0x05, b'Z'];
+        let src = [0x05, 0x00, 0x00, 0x05, b'Z'];
         assert_eq!(decode(&src, 2, 1).unwrap(), vec![0, 0]);
     }
 
@@ -855,13 +855,14 @@ mod tests {
 
     #[test]
     fn parses_compressed_frame_with_clamp() {
-        // 画布 4x4,1 帧 4x2 压缩(flags=3):行 1 的尾零游程多发 1,截断到行宽
-        let body: Vec<u8> = vec![0x05, 0x00, 0xAA, 0x00, 0x01, 0x06, 0x00, 0xBB, 0x00, 0x04];
+        // 画布 4x4,1 帧 4x2 压缩(flags=3):行 0 零游程 1 后行未满补透明;
+        // 行 1 的尾零游程多发 1,截断到行宽
+        let body: Vec<u8> = vec![0x05, 0x00, 0xAA, 0x00, 0x01, 0x05, 0x00, 0xBB, 0x00, 0x04];
         let data = shp_bytes((4, 4), &[frame_header(0, 0, 4, 2, 3, 32)], &body);
         let shp = ShpFile::parse(&data).unwrap();
         let f = &shp.frames[0];
         assert_eq!(f.header.flags, 3);
-        assert_eq!(f.pixels, vec![0xAA, 0, 0x01, 0, 0xBB, 0, 0, 0]);
+        assert_eq!(f.pixels, vec![0xAA, 0, 0, 0, 0xBB, 0, 0, 0]);
     }
 
     #[test]
@@ -920,8 +921,8 @@ Expected: 各 7 passed
 - [ ] **Step 4: 追加真实资产测试(`crates/core/tests/format_samples.rs` 末尾)**
 
 ```rust
-/// pwrlvl.shp:最小 1 帧未压缩 SHP(研究文档 §1.5 逐字节验证)。
-/// 像素:fe×9 00×4 fe×3(16 字节,帧内嵌 4 个透明像素)。
+/// pwrlvl.shp:最小 1 帧未压缩 SHP(研究文档 §1.5;像素拆分经哈希钉死样本
+/// 直读复核,勘误为 fe×10 00×4 fe×2)。
 #[test]
 #[ignore]
 fn shp_pwrlvl_minimal_uncompressed() {
@@ -939,9 +940,9 @@ fn shp_pwrlvl_minimal_uncompressed() {
     assert_eq!((f.header.x, f.header.y, f.header.cx, f.header.cy), (0, 0, 8, 2));
     assert_eq!(f.header.flags, 1); // 仅 bit0;bit1 未置 → 未压缩
     assert_eq!(f.header.offset, 32); // 8 + 24,恰在表尾
-    let mut expected = vec![0xFEu8; 9];
+    let mut expected = vec![0xFEu8; 10];
     expected.extend_from_slice(&[0u8; 4]);
-    expected.extend_from_slice(&[0xFEu8; 3]);
+    expected.extend_from_slice(&[0xFEu8; 2]);
     assert_eq!(f.pixels, expected);
 }
 
