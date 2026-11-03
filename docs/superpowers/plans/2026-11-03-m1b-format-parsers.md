@@ -1062,7 +1062,9 @@ pub mod tmp;
 //! 布局(两个 .sno 样本完全自洽,`data_start = 8 + 24*tiles` 线性精确成立):
 //! 8 字节头 `{u16 zero=0; u16 width; u16 height; u16 tiles}` +
 //! `tiles`×24 字节矩形项 `{i16 x; i16 y; u16 cx; u16 cy; u32 unknown_a;
-//! u16 _b; u16 _c; u16 unknown_d; u8 radar[3]; u8 _pad; u32 data_offset}`。
+//! u16 _b; u16 unknown_d; u8 radar[3]; u8 _pad; u32 data_offset}`
+//! (勘误:初稿字段清单多列一个 `u16 _c` 凑成 26 字节,与 24 字节步长矛盾;
+//! radar 实测在 +0x10,unknown_d 在 +0x0E,data_offset=8+24·N 线性精确)。
 //! 图形数据为 RLEZeroTS 行链(与 SHP 同方案,含同样的 +1 零游程怪癖);
 //! 空瓦片约定 `cx==cy==data_offset==0`。
 
@@ -1119,8 +1121,9 @@ impl TmpRa2File {
             let cx = r.read_u16_le()?;
             let cy = r.read_u16_le()?;
             let unknown_a = r.read_u32_le()?;
+            // 只有一个零 u16 间隙(_b)——勘误:初稿多读一个 _c 会变 26 字节步长,
+            // 与 data_offset=8+24·N 线性算术及 radar@+0x10 实测矛盾。
             let _b = r.read_u16_le()?;
-            let _c = r.read_u16_le()?;
             let unknown_d = r.read_u16_le()?;
             let radar = [r.read_u8()?, r.read_u8()?, r.read_u8()?];
             let _pad = r.read_u8()?;
@@ -1228,8 +1231,13 @@ mod tests {
 
     #[test]
     fn parses_tiles_and_decodes_rle() {
-        // 画布 60x60:图形瓦片 4x2 @数据 56(表尾,8+24*2),空瓦片跟随
-        let body: Vec<u8> = vec![0x05, 0x00, 0x31, 0x00, 0x01, 0x06, 0x00, 0x32, 0x00, 0x04];
+        // 画布 60x60:图形瓦片 4x2 @数据 56(表尾,8+24*2),空瓦片跟随。
+        // 勘误:初稿 body `05 00 31 00 01 06 00 32 00 04` 行 1 块 count=6 但
+        // 只剩 5 字节(EOF 矛盾);按断言像素反推自洽编码:
+        // 行 0 = 31 + 零游程1 + 01(count=6),行 1 = 32 + 零游程4 截断(count=5)。
+        let body: Vec<u8> = vec![
+            0x06, 0x00, 0x31, 0x00, 0x01, 0x01, 0x05, 0x00, 0x32, 0x00, 0x04,
+        ];
         let data = tmp_bytes(
             60,
             60,

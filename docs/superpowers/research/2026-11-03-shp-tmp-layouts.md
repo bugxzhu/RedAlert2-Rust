@@ -183,7 +183,6 @@ Reverse-engineered; XCC has no RA2 TMP reader. Field semantics marked **(observe
 | +0x04 | 2 | u16 | rect width = RLE row width | 29 | 0 | 120 |
 | +0x06 | 2 | u16 | rect height = RLE row count | 17 | 0 | 69 |
 | +0x08 | 4 | u32 | **unknown (observed)**: 3 on most entries, 4 on lobrdb08 t0 | 3 | 4 | 3 |
-| +0x0A | 2 | u16 | zero (observed) | 0 | 0 | 0 |
 | +0x0C | 2 | u16 | zero (observed) | 0 | 0 | 0 |
 | +0x0E | 2 | u16 | **unknown (observed)**: 0 on empty entries; 1 (burnt01 graphic), 6 (lobrdb08 graphic). Possibly ramp/terrain/elevation class | 1 | 0 | 6 |
 | +0x10 | 4 | u32 | **suspected radar/minimap RGB** (3×u8 + pad) (observed): 0 except lobrdb08 t0 = `00 fb 12 00` = bright green | 0 | green | 0 |
@@ -237,7 +236,7 @@ Empty-tile convention: rect (0,0,0,0) with data_offset 0. lobrdb08 has 5 empty e
 - One shared `rle_zero_ts::decode(&[u8], cx, cy) -> Vec<u8>` serves SHP frames and RA2 TMP tiles.
 
 **RA2 TMP reader**
-- `TmpRa2Header { zero: u16, width: u16, height: u16, tiles: u16 }`, `TmpRa2Tile { x: i16, y: i16, cx: u16, cy: u16, unknown_a: u32, _b: u16, _c: u16, unknown_d: u16, radar: [u8; 3], _pad: u8, data_offset: u32 }`.
+- `TmpRa2Header { zero: u16, width: u16, height: u16, tiles: u16 }`, `TmpRa2Tile { x: i16, y: i16, cx: u16, cy: u16, unknown_a: u32, _b: u16, unknown_d: u16, radar: [u8; 3], _pad: u8, data_offset: u32 }` (勘误 2026-11-04: 原清单多一个 `_c` u16,与 24 字节步长及 +0x10 radar 实测矛盾,已删;实现与真库 3 测通过背书)。
 - Errors: `zero != 0`; `tiles == 0`; `8 + 24*tiles > file_len`; rect fields nonzero but `data_offset == 0` (or vice versa: offset != 0 with cx*cy == 0); rect out of canvas; RLE chain breaks.
 - Empty tile = `cx == 0 && cy == 0 && data_offset == 0` — treat as "present but draws nothing" (the entry still exists; do not compact the table).
 - Compose tiles onto the W×H canvas at their (x, y) rects; the graphic pieces are arbitrary rects (one file had a 120×69 diamond inside a 180×120 canvas), not per-tile diamonds.
