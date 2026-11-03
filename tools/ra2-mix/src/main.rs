@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+//! ra2-mix:MIX 档案命令行工具(list / extract / cat)。
+//!
+//! 退出码契约:0 成功;1 找不到文件/解析失败/写失败;2 用法错误(含非 UTF-8 参数)。
+
 use ra2_core::format::mix::MixArchive;
 use std::io::Write;
 use std::process::ExitCode;
@@ -11,15 +15,57 @@ fn usage() -> ! {
     std::process::exit(2);
 }
 
-fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    match args.as_slice() {
-        [cmd, mix_path, rest @ ..] => run(cmd, mix_path, rest),
-        _ => usage(),
+/// 把字节写 stdout;下游提前关闭(BrokenPipe,如 `| head`)视为成功。
+fn write_stdout(data: &[u8]) -> ExitCode {
+    let mut out = std::io::stdout();
+    match out.write_all(data).and_then(|()| out.flush()) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("写 stdout 失败: {e}");
+            ExitCode::from(1)
+        }
     }
 }
 
-fn run(cmd: &str, mix_path: &str, rest: &[String]) -> ExitCode {
+enum Action<'a> {
+    List,
+    Cat(&'a str),
+    Extract(&'a str, &'a str),
+}
+
+fn main() -> ExitCode {
+    // std::env::args() 遇非 UTF-8 参数会 panic;改用 args_os,非 UTF-8 按用法错误处理
+    let mut args = Vec::new();
+    for a in std::env::args_os().skip(1) {
+        match a.into_string() {
+            Ok(s) => args.push(s),
+            Err(_) => usage(),
+        }
+    }
+    // 先裁决用法,再触碰文件 IO(未知子命令即使 MIX 不可读也必须退出 2)
+    let (mix_path, action) = match args.as_slice() {
+        [cmd, mix_path, rest @ ..] => match (cmd.as_str(), rest) {
+            ("list", []) => (mix_path.as_str(), Action::List),
+            ("cat", [name]) => (mix_path.as_str(), Action::Cat(name.as_str())),
+            ("extract", [name, flag, dir]) if flag == "-o" => {
+                if dir == "-" {
+                    (mix_path.as_str(), Action::Cat(name.as_str()))
+                } else {
+                    (
+                        mix_path.as_str(),
+                        Action::Extract(name.as_str(), dir.as_str()),
+                    )
+                }
+            }
+            _ => usage(),
+        },
+        _ => usage(),
+    };
+    run(mix_path, action)
+}
+
+fn run(mix_path: &str, action: Action<'_>) -> ExitCode {
     let data = match std::fs::read(mix_path) {
         Ok(d) => d,
         Err(e) => {
@@ -34,45 +80,47 @@ fn run(cmd: &str, mix_path: &str, rest: &[String]) -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    match (cmd, rest) {
-        ("list", []) => {
+    match action {
+        Action::List => {
+            // 先攒齐再一次性写出:list 中途断管不该留下半截 panic
+            let mut listing = String::new();
             for e in mix.entries() {
-                println!("{:08X} {:>10} {:>10}", e.id, e.offset, e.size);
+                listing.push_str(&format!("{:08X} {:>10} {:>10}\n", e.id, e.offset, e.size));
             }
-            ExitCode::SUCCESS
+            write_stdout(listing.as_bytes())
         }
-        ("cat", [name]) => write_out(&mix, name, None),
-        ("extract", [name, out_flag, out_target]) if out_flag == "-o" => {
-            if out_target == "-" {
-                write_out(&mix, name, None)
-            } else {
-                write_out(&mix, name, Some(out_target))
+        Action::Cat(name) => match mix.read(name) {
+            Ok(d) => write_stdout(d),
+            Err(e) => {
+                eprintln!("{e}");
+                ExitCode::from(1)
             }
-        }
-        _ => usage(),
+        },
+        Action::Extract(name, dir) => match mix.read(name) {
+            Ok(d) => {
+                let path = std::path::Path::new(dir).join(name);
+                if let Some(parent) = path.parent() {
+                    if let Err(e) = std::fs::create_dir_all(parent) {
+                        eprintln!("创建目录 {} 失败: {e}", parent.display());
+                        return ExitCode::from(1);
+                    }
+                }
+                match std::fs::write(&path, d) {
+                    Ok(()) => {
+                        // 用 eprintln:println! 在管道关闭时会 panic,破坏退出码契约
+                        eprintln!("已写入 {}", path.display());
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("写 {} 失败: {e}", path.display());
+                        ExitCode::from(1)
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("{e}");
+                ExitCode::from(1)
+            }
+        },
     }
-}
-
-fn write_out(mix: &MixArchive, name: &str, to_dir: Option<&str>) -> ExitCode {
-    let data = match mix.read(name) {
-        Ok(d) => d,
-        Err(e) => {
-            eprintln!("{e}");
-            return ExitCode::from(1);
-        }
-    };
-    match to_dir {
-        None => {
-            std::io::stdout().write_all(data).unwrap();
-        }
-        Some(dir) => {
-            let path = std::path::Path::new(dir).join(name);
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent).unwrap();
-            }
-            std::fs::write(&path, data).unwrap_or_else(|e| panic!("写 {}: {e}", path.display()));
-            println!("已写入 {}", path.display());
-        }
-    }
-    ExitCode::SUCCESS
 }
