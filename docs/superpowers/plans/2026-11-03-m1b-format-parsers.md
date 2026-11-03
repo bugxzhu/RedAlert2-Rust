@@ -3253,17 +3253,8 @@ fn load(name: &str) -> MixArchive {
     MixArchive::parse(data).expect("解析 MIX")
 }
 
-/// 逐级按名下降 MIX 链读取条目(与 format_samples.rs 同款助手;测试 crate 各自独立)。
-fn read_from_chain(chain: &[&str], name: &str) -> Vec<u8> {
-    let mut bytes =
-        std::fs::read(assets_dir().join(chain[0])).unwrap_or_else(|e| panic!("读顶层: {e}"));
-    for level in &chain[1..] {
-        let mix = MixArchive::parse(bytes).expect("解析嵌套 MIX");
-        bytes = mix.read(level).unwrap_or_else(|e| panic!("读 {level}: {e}")).to_vec();
-    }
-    let mix = MixArchive::parse(bytes).expect("解析目标 MIX");
-    mix.read(name).unwrap_or_else(|e| panic!("读 {name}: {e}")).to_vec()
-}
+// (勘误:原稿此处含未调用的 read_from_chain 助手——dead_code 触发 clippy -D
+// 失败,已删;全链读取由 load() + 直连 parse/read 完成,行为不变。)
 
 #[test]
 #[ignore]
