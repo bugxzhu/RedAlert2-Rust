@@ -244,7 +244,9 @@ fn real_mixes_with_encrypted_or_unknown_flags_are_unsupported() {
         let blob = ra2md.read(name).unwrap_or_else(|e| panic!("读 {name}: {e}"));
         match MixArchive::parse(blob.to_vec()) {
             Err(FormatError::Unsupported(_)) => {}
-            other => panic!("{name}({why})应报 Unsupported,实际 {other:?}"),
+            // MixArchive 未派生 Debug,不能整体 {other:?};按分支报错
+            Err(e) => panic!("{name}({why})应报 Unsupported,实际 {e:?}"),
+            Ok(_) => panic!("{name}({why})应报 Unsupported,实际解析成功"),
         }
     }
     // 未知高位(非 digest/非加密)
