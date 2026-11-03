@@ -346,18 +346,29 @@ git commit -m "feat(core): ByteReader 字节游标"
 
 ### Task 3: Westwood CRC 与 MIX 文件名 ID
 
+> **修正(2026-11-03,Task 5 真库实测后追溯)**:本任务原假设"RA1 血统的 `westwood_crc` 即 TS/RA2 MIX 文件名 ID"**不成立**(ra2md.mix 实测 ID 0x763C81DD 属于 key.ini,与 RA1 CRC 的任何大小写变体都不相等)。
+> 正确算法取自 XCC 源码 `misc/mix_file.cpp` 的 `Cmix_file::get_id`(ts/ra2/ra2_yr 分支;XCC 为 GPL,作者 Olaf van der Spek):
+> 1. 名字 ASCII 大写化,`'/'` 视同 `'\\'`;
+> 2. 若长度非 4 的倍数(余数 r):追加 1 字节(值为 r),再追加 `3-r` 个"余数组首字符"的拷贝;
+> 3. 对补齐后的字节串求**标准 CRC-32**(多项式 0xEDB88320,反射,初值=终值异或=0xFFFFFFFF)。
+> 实测裁决:ra2md.mix / expandmd01.mix / langmd.mix 三库 local mix database.dat 列出的全部 76 个文件名,`mix_name_id` **76/76 命中**索引 ID。
+> 变更范围:`westwood_crc`(RA1 移植)保留不动;`mix_name_id` 按上述算法重写;新增 `crc32`。下方 Interfaces/测试/实现代码块已同步更新。
+
 **Files:**
 - Create: `crates/core/src/format/crc.rs`
 - Modify: `crates/core/src/format/mod.rs`(追加 `pub mod crc;`)
 
 **Interfaces:**
 - Produces:
-  `pub fn westwood_crc(data: &[u8]) -> u32`
-  `pub fn mix_name_id(name: &str) -> u32`(ASCII 大写化后求 CRC)
-- 算法(移植 CRC.CPP/CRC.H,勿改语义):
+  `pub fn westwood_crc(data: &[u8]) -> u32`(RA1 移植,保留)
+  `pub fn crc32(data: &[u8]) -> u32`(标准 CRC-32)
+  `pub fn mix_name_id(name: &str) -> u32`(TS/RA2 MIX 文件名 ID,见任务头修正说明)
+- westwood_crc 算法(移植 CRC.CPP/CRC.H,勿改语义):
   - `crc=0`;每 4 字节按 LE 组成 u32 `staged`,执行 `crc = crc.rotate_left(1).wrapping_add(staged)`
   - 结束时若有余数(1..3 字节)已按 LE 部分组入 staged:`返回 crc.rotate_left(1).wrapping_add(staged)`;整除则返回 `crc`
   - 空输入返回 0
+- mix_name_id 算法(XCC 语义,勿改):
+  - 字节级 ASCII 大写化,`/`→`\`;长度 `l` 非零且 `r = l % 4 != 0` 时:追加字节 `r`,再追加 `3-r` 个"原串下标 `a = l & !3` 处字符";对补齐字节串求 `crc32`
 
 - [ ] **Step 1: 写失败测试**
 
@@ -403,9 +414,33 @@ mod tests {
     }
 
     #[test]
-    fn name_id_uppercases() {
-        assert_eq!(mix_name_id("rulesmd.ini"), mix_name_id("RulesMD.ini"));
-        assert_eq!(mix_name_id("rulesmd.ini"), westwood_crc(b"RULESMD.INI"));
+    fn crc32_known_vectors() {
+        // 标准 CRC-32 公开校验向量(zlib 兼容)
+        assert_eq!(crc32(b""), 0x0000_0000);
+        assert_eq!(crc32(b"a"), 0xE8B7_BE43);
+        assert_eq!(crc32(b"123456789"), 0xCBF4_3926);
+    }
+
+    #[test]
+    fn name_id_no_padding_when_multiple_of_4() {
+        // "ABCD" 长度 4,无补齐:退化为 crc32("ABCD")
+        assert_eq!(mix_name_id("abcd"), 0xDB17_20A5);
+        assert_eq!(mix_name_id(""), 0);
+    }
+
+    #[test]
+    fn name_id_real_archive_vectors() {
+        // 向量直接取自真实 MIX 索引字节(三库 76/76 命中的抽样)
+        assert_eq!(mix_name_id("key.ini"), 0x763C_81DD); // r=3, 追加 [0x03]
+        assert_eq!(mix_name_id("ra2md.csf"), 0xBD83_5079); // r=1, 追加 [0x01,'F','F']
+        assert_eq!(mix_name_id("local mix database.dat"), 0x366E_051F); // r=2, 追加 [0x02,'A']
+        assert_eq!(mix_name_id("isodes.mix"), 0x8C8C_CA19); // r=3
+    }
+
+    #[test]
+    fn name_id_case_and_slash_normalization() {
+        assert_eq!(mix_name_id("Ra2Md.CsF"), 0xBD83_5079);
+        assert_eq!(mix_name_id("AB/CD.MIX"), mix_name_id("AB\\CD.MIX"));
     }
 }
 ```
@@ -437,16 +472,43 @@ pub fn westwood_crc(data: &[u8]) -> u32 {
     crc
 }
 
+/// 标准 CRC-32(反射,多项式 0xEDB88320,初值与终值异或均为 0xFFFFFFFF)。
+pub fn crc32(data: &[u8]) -> u32 {
+    let mut crc: u32 = 0xFFFF_FFFF;
+    for &b in data {
+        crc ^= b as u32;
+        for _ in 0..8 {
+            let mask = (crc & 1).wrapping_neg();
+            crc = (crc >> 1) ^ (0xEDB8_8320 & mask);
+        }
+    }
+    !crc
+}
+
+/// TS/RA2 MIX 文件名 ID(XCC `Cmix_file::get_id` 的 ts/ra2/yr 分支语义)。
 pub fn mix_name_id(name: &str) -> u32 {
-    let upper: Vec<u8> = name.to_ascii_uppercase().into_bytes();
-    westwood_crc(&upper)
+    let mut buf: Vec<u8> = name.bytes().map(|b| b.to_ascii_uppercase()).collect();
+    for b in &mut buf {
+        if *b == b'/' {
+            *b = b'\\';
+        }
+    }
+    let l = buf.len();
+    if l & 3 != 0 {
+        let a = l & !3;
+        let r = (l - a) as u8;
+        buf.push(r);
+        let c = buf[a];
+        buf.extend(std::iter::repeat_n(c, (3 - r) as usize));
+    }
+    crc32(&buf)
 }
 ```
 
 - [ ] **Step 4: 运行测试通过**
 
 Run: `cargo test -p ra2-core crc`
-Expected: 6 passed。若 `remainder_bytes_fold_on_finish` 失败而其余通过,先核对实现与算法描述;若实现与描述一致,删除该手算向量并在 commit message 注明(集成测试才是裁决)
+Expected: 9 passed(westwood_crc 5 + crc32/mix_name_id 4)。若 `name_id_real_archive_vectors` 失败而其余通过:核对补齐字节序(1 字节余数 r + 3-r 个余数组首字符)与 crc32 初值/终值;真库集成测试(76/76)才是最终裁决
 
 - [ ] **Step 5: Commit**
 
@@ -862,12 +924,15 @@ fn ares_mix_matches_verified_layout() {
     assert_eq!(&data[0..4], b" FSC", "首条目应为 CSF 字符串表");
 }
 
-/// rulesmd.ini 必须能按名从 ra2md.mix 中找到(裁决 mix_name_id 正确性)。
+/// rulesmd.ini 必须能按名从 expandmd01.mix 中找到(裁决 mix_name_id 正确性;
+/// 实测 ID 0x8218F9F4。注意:rulesmd.ini 位于 expandmd01.mix,不在 ra2md.mix——
+/// 后者的 local mix database.dat 列出的 26 个文件名里没有它)。
 #[test]
 #[ignore]
-fn ra2md_contains_rulesmd_ini() {
-    let mix = load("ra2md.mix");
-    assert!(mix.find("rulesmd.ini").is_some(), "mix_name_id 或 MIX 解析有误");
+fn expandmd01_contains_rulesmd_ini() {
+    let mix = load("expandmd01.mix");
+    let e = mix.find("rulesmd.ini").expect("mix_name_id 或 MIX 解析有误");
+    assert_eq!(e.id, 0x8218_F9F4);
 }
 
 /// 社区重打包的扩张 MIX 应包含 xmd(本地混合数据库)。
@@ -877,12 +942,37 @@ fn expandmd01_contains_local_mix_database() {
     let mix = load("expandmd01.mix");
     assert!(mix.find("local mix database.dat").is_some());
 }
+
+/// 真库全量裁决:三库 local mix database.dat 列出的全部文件名(76 个)都能按名命中索引。
+/// LMD 为 XCC 二进制格式:头部之后是 NUL 分隔的纯文件名列表(不含 ID)。
+#[test]
+#[ignore]
+fn lmd_names_resolve_in_all_real_mixes() {
+    for (file, expect_names) in [("ra2md.mix", 26), ("expandmd01.mix", 38), ("langmd.mix", 12)] {
+        let mix = load(file);
+        let lmd = mix.read("local mix database.dat").expect("读取 LMD");
+        let names: Vec<&str> = lmd
+            .split(|&b| b == 0)
+            .filter(|t| {
+                t.len() >= 3
+                    && t.iter().all(|&b| b.is_ascii_graphic() || b == b' ')
+                    && t.contains(&b'.')
+                    && !t.starts_with(b"XCC")
+            })
+            .map(|t| std::str::from_utf8(t).unwrap())
+            .collect();
+        assert_eq!(names.len(), expect_names, "{file} LMD 名单数不符");
+        for n in &names {
+            assert!(mix.find(n).is_some(), "{file}: 按名找不到 {n}");
+        }
+    }
+}
 ```
 
 - [ ] **Step 6: 运行集成测试(真实资产)**
 
 Run: `RA2_ASSETS_DIR="E:\hongjing\Reunion 2023" cargo test -p ra2-core -- --ignored`
-Expected: 3 passed。若 `ra2md_contains_rulesmd_ini` 失败:用 `ra2-mix`(Task 8)或临时调试打印核对 CRC 实现与算法描述;本测试是 mix_name_id 的最终裁决
+Expected: 4 passed。若 `lmd_names_resolve_in_all_real_mixes` 失败:打印未命中名字与两边 ID,核对 mix_name_id;本测试(76/76)是 mix_name_id 的最终裁决
 
 - [ ] **Step 7: Commit**
 
