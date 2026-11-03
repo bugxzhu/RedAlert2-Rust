@@ -1770,7 +1770,7 @@ use super::bytes::ByteReader;
 use super::FormatError;
 
 pub const COMPRESSION_IMA: u8 = 0x63;
-const CHUNK_ID: i32 = 0x0000_DEAF; // 仅记录,不校验(XCC 同)
+pub const CHUNK_ID: i32 = 0x0000_DEAF; // 仅记录,不校验(XCC 同)
 
 /// XCC `aud_decode.cpp:8-20` 的步长表(Westwood 变体,勿改成"标准"IMA 表)。
 const IMA_STEP_TABLE: [i32; 89] = [
@@ -1956,7 +1956,7 @@ mod tests {
         v.push(compression);
         for (payload, out) in chunks {
             v.extend_from_slice(&(payload.len() as u16).to_le_bytes());
-            v.extend_from_slice(out);
+            v.extend_from_slice(&out.to_le_bytes());
             v.extend_from_slice(&CHUNK_ID.to_le_bytes());
             v.extend_from_slice(payload);
         }
@@ -1977,10 +1977,11 @@ mod tests {
 
     #[test]
     fn state_carries_across_chunks() {
-        // 块 0 末状态 (index=7, sample=13);块 1 首字节 0x07:
+        // 块 0 末状态 (index=7, sample=13);块 1 首字节 0x77(高低半字节均 code 7):
         // step=14:delta=1+3+7+14=25 → 38;再 step=31:delta=3+7+15+31=56 → 94
         // 若按块复位状态,块 1 会从 (0,0) 重新解码,得不到 [38, 94]
-        let data = aud_bytes(&[(&[0x07], 4), (&[0x07], 4)], 2, COMPRESSION_IMA);
+        // (勘误:初稿载荷写 0x07,实测解码 [11,13,38,41];按注释算术意图改 0x77)
+        let data = aud_bytes(&[(&[0x07], 4), (&[0x77], 4)], 2, COMPRESSION_IMA);
         let aud = Aud::parse(&data).unwrap();
         assert_eq!(aud.samples, [11, 13, 38, 94]);
         assert_eq!(aud.chunks.len(), 2);
