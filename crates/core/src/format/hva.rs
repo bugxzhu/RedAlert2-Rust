@@ -37,9 +37,10 @@ impl HvaFile {
                 "HVA frames={frames} sections={sections},都必须 > 0"
             )));
         }
-        // 尺寸等式用 u64,防 u32 计数在 usize 上溢出
-        let expected = 24u64 + 16 * sections as u64 + 48 * frames as u64 * sections as u64;
-        if data.len() as u64 != expected {
+        // 尺寸等式用 u128:u64 也会被恶意 F/S 溢出(48*(2^32-1)^2 ≈ 8.85e20 超过
+        // u64::MAX,debug 溢出检查会 panic);u128 下任何 F/S 组合均无溢出。
+        let expected = 24u128 + 16 * sections as u128 + 48 * frames as u128 * sections as u128;
+        if data.len() as u128 != expected {
             // 勘误:brief 原文格式串混用 `{}` 与内联捕获 `{expected}` 却未传
             // 位置实参,无法编译(compile error);此处补传 data.len(),消息文本不变。
             return Err(FormatError::Invalid(format!(
@@ -160,6 +161,19 @@ mod tests {
     fn rejects_size_mismatch() {
         let mut data = hva_bytes(2, 2, &["A", "B"], &[[1.0f32; 12]; 4]);
         data.pop();
+        assert!(matches!(
+            HvaFile::parse(&data),
+            Err(FormatError::Invalid(_))
+        ));
+    }
+
+    #[test]
+    fn hostile_max_counts_report_invalid_not_panic() {
+        // 恶意 24 字节头:F=S=u32::MAX。48*F*S ≈ 8.85e20 溢出 u64——u128 等式
+        // 必须安静返回 Invalid,而不是在 debug 溢出检查下 panic(终审 Important 回归)。
+        let mut data = [0u8; 24];
+        data[16..20].copy_from_slice(&u32::MAX.to_le_bytes());
+        data[20..24].copy_from_slice(&u32::MAX.to_le_bytes());
         assert!(matches!(
             HvaFile::parse(&data),
             Err(FormatError::Invalid(_))
