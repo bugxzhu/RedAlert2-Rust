@@ -3,6 +3,7 @@
 //! 原版资产容器与数据格式解析。
 
 pub mod bytes;
+pub mod crc;
 
 use std::fmt;
 
