@@ -79,3 +79,21 @@ fn lmd_names_resolve_in_all_real_mixes() {
         }
     }
 }
+
+/// 从 expandmd01.mix 提取 rulesmd.ini 并解析(MIX+INI 联合裁决)。
+/// 注:任务简报原文写 ra2md.mix,但实测(见上方 expandmd01_contains_rulesmd_ini)
+/// rulesmd.ini 位于 expandmd01.mix,ra2md.mix 索引中无此 ID。
+#[test]
+#[ignore]
+fn rulesmd_ini_parses_from_mix() {
+    use ra2_core::format::ini::IniDocument;
+    let mix = load("expandmd01.mix");
+    let text = std::str::from_utf8(mix.read("rulesmd.ini").expect("提取 rulesmd.ini"))
+        .expect("rulesmd.ini 应为 UTF-8/ASCII 文本");
+    let doc = IniDocument::parse(text);
+    assert!(doc.section("General").is_some());
+    assert!(doc.section("InfantryTypes").is_some());
+    assert!(doc.section("VehicleTypes").is_some());
+    assert!(doc.section("BuildingTypes").is_some());
+    assert!(doc.sections.len() > 100, "rulesmd.ini 应有大量节");
+}

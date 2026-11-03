@@ -4,6 +4,7 @@
 
 pub mod bytes;
 pub mod crc;
+pub mod ini;
 pub mod lcw;
 pub mod mix;
 
