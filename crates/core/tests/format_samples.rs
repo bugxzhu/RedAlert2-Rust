@@ -506,3 +506,56 @@ fn vxl_1tnk_465_spans_2227_voxels() {
     assert_eq!(total, 2227);
     assert!((s.scale - 1.0 / 12.0).abs() < 1e-6);
 }
+
+/// schp.hva:F=2,S=3(CYLINDER19/CYLINDER57/DUMMY01);
+/// 帧 1 节 0 = 绕 Z 轴 30° 旋转,平移跨帧恒定(帧主序的独立证据,2026-11-03 精确取证)。
+#[test]
+#[ignore]
+fn hva_schp_frame_major_two_frames() {
+    use ra2_core::format::hva::HvaFile;
+    let data = ensure_sample(
+        &["ra2md.mix", "localmd.mix"],
+        "schp.hva",
+        "68f97095812ab96a",
+    );
+    assert_eq!(data.len(), 360);
+    let hva = HvaFile::parse(&data).unwrap();
+    assert_eq!(hva.frames, 2);
+    assert_eq!(hva.section_names, ["CYLINDER19", "CYLINDER57", "DUMMY01"]);
+    // matrices[1][0]:30° 绕 Z 旋转(容差按 f32 存储精度取)
+    let m = &hva.matrices[1][0];
+    assert!((m[0][0] - 0.866_025_45).abs() < 1e-6);
+    assert!((m[0][1] - 0.5).abs() < 1e-6);
+    assert!((m[1][0] - (-0.500_000_06)).abs() < 1e-6);
+    assert!((m[2][2] - 1.0).abs() < 1e-5);
+    assert!((m[0][3] - 55.021_42).abs() < 1e-3);
+    assert!((m[1][3] - 1.923_307_9).abs() < 1e-4);
+    assert!((m[2][3] - 233.498_37).abs() < 1e-3);
+    // 平移跨帧恒定、旋转变化 → 证实帧主序(若节主序,平移会跳变)
+    assert!((hva.matrices[0][0][0][3] - hva.matrices[1][0][0][3]).abs() < 1e-3);
+    assert!((hva.matrices[0][0][0][0] - hva.matrices[1][0][0][0]).abs() > 0.1);
+    // matrices[0][1](CYLINDER57)平移
+    let m01 = &hva.matrices[0][1];
+    assert!((m01[0][3] - (-523.366_4)).abs() < 1e-3);
+    assert!((m01[1][3] - (-8.210_362)).abs() < 1e-5);
+    assert!((m01[2][3] - 161.296_81).abs() < 1e-3);
+}
+
+/// 1tnk.hva:F=1,S=1,名 "B-BODY"(槽尾带垃圾字节);矩阵对角 ≈ 1,带平移。
+#[test]
+#[ignore]
+fn hva_1tnk_single_frame() {
+    use ra2_core::format::hva::HvaFile;
+    let data = ensure_sample(&["ra2.mix", "local.mix"], "1tnk.hva", "ca89519836d92d31");
+    assert_eq!(data.len(), 88);
+    let hva = HvaFile::parse(&data).unwrap();
+    assert_eq!(hva.frames, 1);
+    assert_eq!(hva.section_names, ["B-BODY"]);
+    let m = &hva.matrices[0][0];
+    assert!((m[0][0] - 0.999_999_9).abs() < 1e-6);
+    assert!((m[1][1] - 0.999_999_9).abs() < 1e-6);
+    assert!((m[2][2] - 0.999_999_9).abs() < 1e-6);
+    assert!((m[0][3] - (-191.924_22)).abs() < 1e-2);
+    assert!((m[1][3] - (-0.065_056_756)).abs() < 1e-6);
+    assert!((m[2][3] - 81.487_076).abs() < 1e-4);
+}

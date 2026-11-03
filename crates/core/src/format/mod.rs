@@ -6,6 +6,7 @@ pub mod aud;
 pub mod bytes;
 pub mod crc;
 pub mod csf;
+pub mod hva;
 pub mod ini;
 pub mod lcw;
 pub mod mix;
