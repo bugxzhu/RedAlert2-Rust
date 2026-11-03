@@ -434,7 +434,7 @@ mod tests {
         assert_eq!(mix_name_id("key.ini"), 0x763C_81DD); // r=3, 追加 [0x03]
         assert_eq!(mix_name_id("ra2md.csf"), 0xBD83_5079); // r=1, 追加 [0x01,'F','F']
         assert_eq!(mix_name_id("local mix database.dat"), 0x366E_051F); // r=2, 追加 [0x02,'A']
-        assert_eq!(mix_name_id("isodes.mix"), 0x8C8C_CA19); // r=3
+        assert_eq!(mix_name_id("isodes.mix"), 0x8C8C_CA19); // r=2, 追加 [0x02,'I']
     }
 
     #[test]
