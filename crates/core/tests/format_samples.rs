@@ -412,3 +412,27 @@ fn csf_ra2md_full_parse() {
         Some(12)
     );
 }
+
+/// text1.aud(22050Hz 单声道 16-bit;研究文档 §2.5,2026-11-03 XCC 表复验):
+/// 2 块(1024+562 样本),首 8 样本、跨块窗口、全文件极值全部钉死。
+#[test]
+#[ignore]
+fn aud_text1_ima_decode() {
+    use ra2_core::format::aud::Aud;
+    let data = ensure_sample(&["ra2.mix", "local.mix"], "text1.aud", "99470c6ce81ebe53");
+    assert_eq!(data.len(), 821);
+    let aud = Aud::parse(&data).unwrap();
+    assert_eq!(aud.header.sample_rate, 22050);
+    assert_eq!(aud.header.size_in, 809);
+    assert_eq!(aud.header.size_out, 3172);
+    assert_eq!(aud.chunks.len(), 2);
+    assert_eq!(aud.chunks[0].id, 0x0000_DEAF);
+    assert_eq!((aud.chunks[0].size_in, aud.chunks[0].size_out), (512, 2048));
+    assert_eq!((aud.chunks[1].size_in, aud.chunks[1].size_out), (281, 1124));
+    assert_eq!(aud.samples.len(), 1586);
+    assert_eq!(&aud.samples[..8], &[11, 41, -22, 114, -179, 452, -543, 649]);
+    // 跨块持续性裁决:样本 1024 起为块 1;若按块复位状态,这里不会是 [-217, -97, 12, 708]
+    assert_eq!(&aud.samples[1024..1028], &[-217, -97, 12, 708]);
+    assert_eq!(aud.samples.iter().copied().max(), Some(17293));
+    assert_eq!(aud.samples.iter().copied().min(), Some(-11630));
+}
