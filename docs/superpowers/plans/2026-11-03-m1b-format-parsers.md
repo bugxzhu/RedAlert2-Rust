@@ -2682,7 +2682,8 @@ impl HvaFile {
         let expected = 24u64 + 16 * sections as u64 + 48 * frames as u64 * sections as u64;
         if data.len() as u64 != expected {
             return Err(FormatError::Invalid(format!(
-                "HVA 尺寸等式不符: 文件 {} 字节,应为 {expected}(F={frames}, S={sections})"
+                "HVA 尺寸等式不符: 文件 {} 字节,应为 {expected}(F={frames}, S={sections})",
+                data.len()
             )));
         }
         let s = sections as usize;
@@ -2695,6 +2696,9 @@ impl HvaFile {
             let end = raw.iter().position(|&b| b == 0).unwrap_or(16);
             section_names.push(String::from_utf8_lossy(&raw[..end]).into_owned());
         }
+        // 名字区由独立 r2 读取;主游标 r 仍停在 24(头部后),必须跳过 16*S
+        // 名字区才能开始读矩阵(勘误:初稿漏此 skip,矩阵从名字区内起读)。
+        r.skip(16 * s)?;
         let mut matrices = Vec::with_capacity(f);
         for _ in 0..f {
             let mut frame = Vec::with_capacity(s);
