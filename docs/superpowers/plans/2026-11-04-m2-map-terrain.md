@@ -40,7 +40,9 @@
 - 确定性:核心解析器无 HashMap/HashSet(稀疏 (x,y) 索引用"排序 Vec + 二分");f32 仅作 [Lighting] 字段存取,不做浮点决策。
 - Rust 不在 PATH:所有 cargo/rustc 命令前 `export PATH="$HOME/.cargo/bin:$PATH"`。
 - 计数基线(2026-11-04 实测):`cargo test --workspace` = **85 合成**(79 core + 6 cli);`RA2_ASSETS_DIR=... cargo test --workspace -- --ignored` = **21**(13 format_samples + 1 m1b_acceptance + 7 mix_integration)。每任务 Run 步骤给出期望累计值,最终 **合成 188 / ignored 27**。
-  > **计数勘误(2026-11-04,Task 3 审查 Critical 修复)**:gbk_lossy lead 0xFF 越界 panic 的修复附带 1 个回归测试 → Task 3 后合成计数 118+1=**119**,此后每任务 Run 步骤的期望累计值整体 +1(136→137 / 146→147 / 151→152 / 160→161 / 169→170 / 180→181 / 188→**189**);ignored 链不变(22/25/26/27)。终账以 189/27 为准。
+  > **计数勘误(2026-11-04,Task 3 审查 Critical 修复)**:gbk_lossy lead 0xFF 越界 panic 的修复附带 1 个回归测试 → Task 3 后合成计数 118+1=**119**,此后每任务 Run 步骤的期望累计值整体 +1(136→137 / 146→147 / 151→152 / 160→161 / 169→170 / 180→181 / 188→**189**);ignored 链不变(22/25/26/27)。
+  >
+  > **计数勘误 2(2026-11-04,Task 9 实现时实证,控制器已独立复核)**:Task 9 简报 Step-2 实含 **12 个测试函数而非 11**(mod.rs 12 个 `#[test]`,控制器 grep 复核),且 pack.rs lenient 契约修复附带 1 个回归钉(`preview_lenient_stops_at_size_in_lie`,pack.rs:591)→ Task 9 后合成计数 170+12+1=**183**(非 181);ignored 链 22+3(map_samples 新增 corpus_walk/snow_tile_index/truncated_preview_group)=**25**(原计划此处为 22)。后续链整体移位:Task 10 期望合成 **191**/ignored 26,Task 11 合成 191/ignored 27。终账以 **191/27** 为准。
 - 每个任务收尾:`cargo fmt --all`、`cargo clippy --all-targets -- -D warnings`、`cargo test --workspace` 全绿后才 commit;涉真实资产的任务另跑 `RA2_ASSETS_DIR="E:\hongjing\Reunion 2023" cargo test --workspace -- --ignored` 全绿。clippy 新近 deny 级 lint 靠预避免(切片分块用 `as_chunks` 风格,循环用迭代器/zip;不得 `#[allow]` 压告警)。
 - commit 用 conventional commits(中文描述可),每条 commit 末尾附:`Co-Authored-By: Claude Code <noreply@anthropic.com>`(用第二个 `-m` 传入)。
 - 零第三方依赖;SHA-256 只出现在测试(自写 FIPS 180-4 实现);`[Digest]` 只读取不校验。
