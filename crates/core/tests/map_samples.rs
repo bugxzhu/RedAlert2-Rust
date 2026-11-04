@@ -145,9 +145,11 @@ fn snow_tile_index_within_theater_mix_capacity() {
     assert_eq!(max_tile, 963, "语料实测最大 SNOW tile(交流意见.map)");
 }
 
-/// 截断 PreviewPack 组(规格依据 §8):7 张 DDLY 图在完整位图后带异常尾块,
-/// 干净前缀恰为 3·pw·ph → 全部 Ok 且预览 Some(2026-11-04 逐图复核);
-/// templateMap.map(无 IsoMapPack5)预览前缀 0 → None。
+/// 截断 PreviewPack 组(规格依据 §8):实测 18 张 DDLY 图在完整位图后带
+/// 异常尾块(此处列 7 张代表,含 base64 %4==2 截尾与块头撒谎两类形态),
+/// 干净前缀恰为 3·pw·ph → 全部 Ok 且预览 Some(2026-11-04 审查者逐图复核);
+/// templateMap.map(无 IsoMapPack5)预览前缀 0 → None,全语料唯一
+/// preview_truncated==true。
 #[test]
 #[ignore]
 fn truncated_preview_group_degrades_gracefully() {

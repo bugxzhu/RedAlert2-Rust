@@ -56,7 +56,8 @@ pub struct PackStats {
     pub overlay_out: usize,
     pub overlay_data_out: usize,
     pub preview_out: usize,
-    /// 预览前缀不足 3·pw·ph(截断/全失败;7 张 DDLY 图前缀精确故为 false)。
+    /// 预览前缀不足 3·pw·ph(截断/全失败;全语料 807 图实测仅 templateMap
+    /// 一张为 true——18 张 DDLY 异常尾图前缀均精确,为 false)。
     pub preview_truncated: bool,
 }
 
