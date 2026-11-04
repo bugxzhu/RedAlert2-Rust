@@ -11,5 +11,7 @@ pub mod gbk;
 pub mod gbk_table;
 pub mod iso;
 pub mod mapdoc;
+pub mod meta;
 pub mod overlay;
 pub mod pack;
+pub mod preview;
