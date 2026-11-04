@@ -247,7 +247,7 @@ All checks are O(text length) arithmetic before any allocation:
    - `OverlayPack` / `OverlayDataPack`: `out_cap == 262144` (reject otherwise; do not allocate-and-trim).
    - `IsoMapPack5`: expected `11·(2W−1)·H (+4 if the producer writes the zero tail)`; **accept `out_cap ≤` that** (four TS-era official maps omit void cells, §3.6) with `out_cap % 11 ∈ {0,4}`; reject anything larger (W,H from `[Map]Size`; if the INI is unavailable, fall back to `out_cap ≤ 1.98 MB` = the 300×300 bound, then verify the identity after decode).
    - `PreviewPack`: `out_cap ≤ 3·pw·ph` (truncated previews decode to *less* — accept short, reject long).
-4. **Corpus-wide observed maxima** (bounds, not limits — over all 540 maps, §12;**勘误 2026-11-04:尺寸极值以 [Map] 段锚定重扫为准,见 §12 勘误块**——max W+H = 499,最大解压瓦片流 = 943,738 B;原"898/1,889,210"系 [Preview] `Size=` 误读): largest `[IsoMapPack5]` text = 669,712 b64 chars; largest `[PreviewPack]` text = 216,296 chars → ~162 KB compressed. The ini-survey's "W+H ≤ 600" cap **holds** (observed 499). Size claims must still come from `[Map]Size` per map plus a hard cap (e.g. decompressed ≤ 2 MB ⇒ W·H bounded).
+4. **Corpus-wide observed maxima** (bounds, not limits — over all 540 maps, §12;**勘误 2026-11-04:尺寸极值以 [Map] 段锚定重扫为准,见 §12 勘误块**——max W+H = 499,最大解压瓦片流 = 943,734 B(勘误二段:实测无零尾,原 943,738 系"+4 尾零"假设,见 §12);原"898/1,889,210"系 [Preview] `Size=` 误读): largest `[IsoMapPack5]` text = 669,712 b64 chars; largest `[PreviewPack]` text = 216,296 chars → ~162 KB compressed. The ini-survey's "W+H ≤ 600" cap **holds** (observed 499). Size claims must still come from `[Map]Size` per map plus a hard cap (e.g. decompressed ≤ 2 MB ⇒ W·H bounded).
 5. **Allocation**: single `Vec::with_capacity(out_cap)`; decoder must error on overrun (`FormatError::UnexpectedEof`) and on `consumed != size_in` / `produced != size_out` (`FormatError::Invalid`).
 
 ## 9. Rust-facing notes (no code)
@@ -313,6 +313,8 @@ Two parallel passes over all 540 maps (`probe5.py` = full decode model; `probe8.
 Corpus maxima (feeds §8): largest `[IsoMapPack5]` text = 669,712 b64 chars; largest `[PreviewPack]` text = 216,296 chars (≈162 KB compressed).
 
 > **勘误(2026-11-04 pre-flight 实测)**:原条目另称"最大解压瓦片流 1,889,210 B(`2+1=3.map` 544×158)""最大图幅 W+H = 898(798×100)""400×200 图解压 1,757,804 B"——三数同根错误:把 **[Preview] 段的 `Size=`(预览图像素尺寸,如 顶峰相见.map 的 0,0,400,200,其真 [Map] 为 200×200)误读为 [Map] 尺寸**,再纯算术推导,未经解码实测。以 [Map] 段锚定全语料重扫(controller 复核 + 计划作者 LZO 实测双确认):**max W+H = 499**(`避暑山庄.map`/`非常之观.map`,399×100,INI 普查的 ≤600 上界因此成立);**最大解压瓦片流 = 943,738 B = 11·543·158+4**(`2+1=3.map`,真尺寸 272×158,含 4 零尾;85,794 格为全语料最大菱形格数)。计划 `2026-11-04-m2-map-terrain.md` 规格依据 §2 同裁。
+>
+> **勘误二段(2026-11-04 M2 终审实测)**:该图瓦片流实测 **943,734 B = 11·543·158,无 4 零尾**——上段的"+4"系生产者尾零假设的推测,经 T11 独立 Python 复测与 807 全量走查证伪。上界公式 `11·(2W−1)·H (+4 if producer writes zero tail)` 作为 bound 仍正确(§8-3 原样),只是该图不写零尾。
 
 ## 13. Sample fingerprints
 
