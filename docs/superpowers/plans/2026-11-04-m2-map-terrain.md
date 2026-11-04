@@ -40,6 +40,7 @@
 - 确定性:核心解析器无 HashMap/HashSet(稀疏 (x,y) 索引用"排序 Vec + 二分");f32 仅作 [Lighting] 字段存取,不做浮点决策。
 - Rust 不在 PATH:所有 cargo/rustc 命令前 `export PATH="$HOME/.cargo/bin:$PATH"`。
 - 计数基线(2026-11-04 实测):`cargo test --workspace` = **85 合成**(79 core + 6 cli);`RA2_ASSETS_DIR=... cargo test --workspace -- --ignored` = **21**(13 format_samples + 1 m1b_acceptance + 7 mix_integration)。每任务 Run 步骤给出期望累计值,最终 **合成 188 / ignored 27**。
+  > **计数勘误(2026-11-04,Task 3 审查 Critical 修复)**:gbk_lossy lead 0xFF 越界 panic 的修复附带 1 个回归测试 → Task 3 后合成计数 118+1=**119**,此后每任务 Run 步骤的期望累计值整体 +1(136→137 / 146→147 / 151→152 / 160→161 / 169→170 / 180→181 / 188→**189**);ignored 链不变(22/25/26/27)。终账以 189/27 为准。
 - 每个任务收尾:`cargo fmt --all`、`cargo clippy --all-targets -- -D warnings`、`cargo test --workspace` 全绿后才 commit;涉真实资产的任务另跑 `RA2_ASSETS_DIR="E:\hongjing\Reunion 2023" cargo test --workspace -- --ignored` 全绿。clippy 新近 deny 级 lint 靠预避免(切片分块用 `as_chunks` 风格,循环用迭代器/zip;不得 `#[allow]` 压告警)。
 - commit 用 conventional commits(中文描述可),每条 commit 末尾附:`Co-Authored-By: Claude Code <noreply@anthropic.com>`(用第二个 `-m` 传入)。
 - 零第三方依赖;SHA-256 只出现在测试(自写 FIPS 180-4 实现);`[Digest]` 只读取不校验。
@@ -1183,7 +1184,8 @@ fn read_map(rel: &str) -> Vec<u8> {
 
 /// GBK/UTF-8 解码策略的真图锁定(普查 §1 编码普查 + 规格依据 §10):
 /// 随机地图.map 是真 UTF-8;城市海啸.map 的 Name 是 GBK;终极海战防守图.map
-/// 的 Name 带截断 GBK 序列。三者都必须无损解析出 IniDocument 且 Name 正确。
+/// 的对象段 Name 带截断 GBK 序列([Basic] Name 为 ASCII 拼音,勘误见下)。
+/// 三者都必须无损解析出 IniDocument 且 Name 正确。
 #[test]
 #[ignore]
 fn decode_policy_over_real_maps() {
@@ -1193,15 +1195,17 @@ fn decode_policy_over_real_maps() {
     // GBK 回退
     let doc = IniDocument::parse(&decode_map_text(&read_map("Maps/MadHQ/城市海啸.map")));
     assert_eq!(doc.value("Basic", "Name"), Some("海嘯"));
-    // 截断 GBK:整文件有损解码后仍成档(Name 是该文件的第二个重复键,last-wins)
+    // 截断 GBK:整文件有损解码后仍成档
     let doc = IniDocument::parse(&decode_map_text(&read_map("Maps/DDLY/终极海战防守图.map")));
-    let name = doc.value("Basic", "Name").expect("应有 Name");
+    assert_eq!(doc.value("Basic", "Name"), Some("jiangweidajihaizhanfangshoutu"));
+    // 截断序列在该图的对象段(如 [01000014])Name,不在 [Basic]
+    let name = doc.value("01000014", "Name").expect("对象段应有 Name");
     assert!(name.contains('\u{FFFD}'), "截断序列应产生替换符: {name}");
     assert!(name.contains("玩家援"));
 }
 ```
 
-注意:终极海战防守图.map 有**两个** `Name=` 键(首个为 ASCII 拼音,第二个为 GBK 截断序列)——IniDocument last-wins 取后者,这正是 Task 2 锁定行为的真实样本;该图其余部分正常解析。
+> **勘误(2026-11-04,Task 3 实现时实证)**:原文称该图 [Basic] 有"两个 `Name=` 键(首个 ASCII 拼音,第二个 GBK 截断)——last-wins 真实样本"。实测(False):[Basic] 仅一个 `Name=jiangweidajihaizhanfangshoutu`(ASCII 拼音);截断 GBK `31 cd e6 bc d2 d4 ae be` 的 Name 在**对象段**(如 `[01000014]`),全文件任一段内 0 重复键(与普查 §8"全语料 0 重复键"一致)。last-wins 行为仅由 Task 2 合成测试锁定,无真实语料样本。测试已按真实事实改写(见 map_samples.rs 提交 8017297)。
 
 Run: `RA2_ASSETS_DIR="E:\hongjing\Reunion 2023" cargo test -p ra2-core --test map_samples -- --ignored`
 Expected: 1 passed(ignored 22/27 进度)
