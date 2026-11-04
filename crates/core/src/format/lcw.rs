@@ -6,7 +6,9 @@
 
 use super::FormatError;
 
-pub fn lcw_decode(src: &[u8], out: &mut Vec<u8>) -> Result<usize, FormatError> {
+/// LCW(Format 80)解压;返回源内消耗的字节数(包段循环核对 consumed ==
+/// size_in 用;产出用 out 的增量核对)。
+pub fn lcw_decode_consumed(src: &[u8], out: &mut Vec<u8>) -> Result<usize, FormatError> {
     let mut sp = 0usize;
     // 读一个字节并前进(显式递增,避免宏/闭包重复读取同一位置)
     fn next(src: &[u8], sp: &mut usize) -> Result<u8, FormatError> {
@@ -43,7 +45,7 @@ pub fn lcw_decode(src: &[u8], out: &mut Vec<u8>) -> Result<usize, FormatError> {
             copy_from_out(out, start, count);
         } else if op & 0x40 == 0 {
             if op == 0x80 {
-                return Ok(out.len());
+                return Ok(sp);
             }
             // 源字面量
             let count = (op & 0x3F) as usize;
@@ -77,6 +79,11 @@ pub fn lcw_decode(src: &[u8], out: &mut Vec<u8>) -> Result<usize, FormatError> {
             copy_from_out(out, off, count);
         }
     }
+}
+
+/// LCW(Format 80)解压;返回**累计产出长度**(M1b 契约,SHP/TMP 调用方)。
+pub fn lcw_decode(src: &[u8], out: &mut Vec<u8>) -> Result<usize, FormatError> {
+    lcw_decode_consumed(src, out).map(|_| out.len())
 }
 
 #[cfg(test)]
@@ -142,5 +149,19 @@ mod tests {
             lcw_decode(&[0x01, 0x01, 0x80], &mut out), // back=1 但 out 为空
             Err(FormatError::Invalid(_))
         ));
+    }
+
+    #[test]
+    fn consumed_tracks_source_bytes() {
+        // 0x83 = 字面量运行 count 3;消耗量含 0x80 终止符
+        let mut out = Vec::new();
+        let consumed = lcw_decode_consumed(&[0x83, b'A', b'B', b'C', 0x80], &mut out).unwrap();
+        assert_eq!(consumed, 5);
+        assert_eq!(out, b"ABC");
+        // 包装函数语义不变:返回累计产出长度(M1b 契约)
+        let mut out2 = Vec::new();
+        let produced = lcw_decode(&[0x83, b'A', b'B', b'C', 0x80], &mut out2).unwrap();
+        assert_eq!(produced, 3);
+        assert_eq!(out2, b"ABC");
     }
 }

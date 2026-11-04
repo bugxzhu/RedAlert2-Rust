@@ -10,3 +10,4 @@
 pub mod gbk;
 pub mod gbk_table;
 pub mod mapdoc;
+pub mod pack;
