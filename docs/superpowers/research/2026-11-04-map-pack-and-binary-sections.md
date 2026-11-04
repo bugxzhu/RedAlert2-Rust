@@ -142,7 +142,7 @@ Both forms verified corpus-wide (§12); the tail split per producer is counted t
 | TEMPERATE | c1a01md | 749/749 |
 | SNOW | c1a03md | 1227/1227 |
 | DESERT | c2s02md | 500/500 |
-| URBAN | 城墙之战 | 486/486 |
+| URBAN | 城郊之战 | 486/486 |
 | NEWURBAN | c1a02md | 1154/1154 |
 
 (LUNAR: the corpus's single lunar map `moonpatr.map` carries no `[Terrain]` entries — nothing to test there.)
@@ -247,7 +247,7 @@ All checks are O(text length) arithmetic before any allocation:
    - `OverlayPack` / `OverlayDataPack`: `out_cap == 262144` (reject otherwise; do not allocate-and-trim).
    - `IsoMapPack5`: expected `11·(2W−1)·H (+4 if the producer writes the zero tail)`; **accept `out_cap ≤` that** (four TS-era official maps omit void cells, §3.6) with `out_cap % 11 ∈ {0,4}`; reject anything larger (W,H from `[Map]Size`; if the INI is unavailable, fall back to `out_cap ≤ 1.98 MB` = the 300×300 bound, then verify the identity after decode).
    - `PreviewPack`: `out_cap ≤ 3·pw·ph` (truncated previews decode to *less* — accept short, reject long).
-4. **Corpus-wide observed maxima** (bounds, not limits — measured over all 540 maps, §12): largest `[IsoMapPack5]` text = 669,712 b64 chars → 502,284 compressed bytes → decompresses to 1,757,804 B (a 400×200 map); **largest decompressed tile stream = 1,889,210 B** (`2+1=3.map`, 544×158 = 11·1087·158+4); largest `[PreviewPack]` text = 216,296 chars → ~162 KB compressed. **Caveat: the ini-survey's "W+H ≤ 2·300" cap does NOT hold in this corpus** — one map is 798×100 (W+H = 898). Size claims must come from `[Map]Size` plus a hard cap (e.g. decompressed ≤ 2 MB ⇒ W·H bounded), never from the survey's summary bound.
+4. **Corpus-wide observed maxima** (bounds, not limits — over all 540 maps, §12;**勘误 2026-11-04:尺寸极值以 [Map] 段锚定重扫为准,见 §12 勘误块**——max W+H = 499,最大解压瓦片流 = 943,738 B;原"898/1,889,210"系 [Preview] `Size=` 误读): largest `[IsoMapPack5]` text = 669,712 b64 chars; largest `[PreviewPack]` text = 216,296 chars → ~162 KB compressed. The ini-survey's "W+H ≤ 600" cap **holds** (observed 499). Size claims must still come from `[Map]Size` per map plus a hard cap (e.g. decompressed ≤ 2 MB ⇒ W·H bounded).
 5. **Allocation**: single `Vec::with_capacity(out_cap)`; decoder must error on overrun (`FormatError::UnexpectedEof`) and on `consumed != size_in` / `produced != size_out` (`FormatError::Invalid`).
 
 ## 9. Rust-facing notes (no code)
@@ -310,7 +310,9 @@ Two parallel passes over all 540 maps (`probe5.py` = full decode model; `probe8.
 | `[Digest]` present | 537/540 (3 GBK-named maps lack the section) |
 | theaters | TEMPERATE 217, SNOW 106, URBAN 78, DESERT 77, NEWURBAN 61, LUNAR 1 |
 
-Corpus maxima (feeds §8): largest `[IsoMapPack5]` text = 669,712 b64 chars → 502,284 B compressed → 1,757,804 B decompressed (a 400×200 map); **largest decompressed tile stream = 1,889,210 B** (`2+1=3.map`, 544×158 = 11·1087·158+4); largest `[PreviewPack]` text = 216,296 chars (≈162 KB compressed); largest map extent **W+H = 898** (798×100) — the sibling survey's "W+H ≤ 600" does not hold here.
+Corpus maxima (feeds §8): largest `[IsoMapPack5]` text = 669,712 b64 chars; largest `[PreviewPack]` text = 216,296 chars (≈162 KB compressed).
+
+> **勘误(2026-11-04 pre-flight 实测)**:原条目另称"最大解压瓦片流 1,889,210 B(`2+1=3.map` 544×158)""最大图幅 W+H = 898(798×100)""400×200 图解压 1,757,804 B"——三数同根错误:把 **[Preview] 段的 `Size=`(预览图像素尺寸,如 顶峰相见.map 的 0,0,400,200,其真 [Map] 为 200×200)误读为 [Map] 尺寸**,再纯算术推导,未经解码实测。以 [Map] 段锚定全语料重扫(controller 复核 + 计划作者 LZO 实测双确认):**max W+H = 499**(`避暑山庄.map`/`非常之观.map`,399×100,INI 普查的 ≤600 上界因此成立);**最大解压瓦片流 = 943,738 B = 11·543·158+4**(`2+1=3.map`,真尺寸 272×158,含 4 零尾;85,794 格为全语料最大菱形格数)。计划 `2026-11-04-m2-map-terrain.md` 规格依据 §2 同裁。
 
 ## 13. Sample fingerprints
 
@@ -321,7 +323,7 @@ Corpus maxima (feeds §8): largest `[IsoMapPack5]` text = 669,712 b64 chars → 
 | c2s02md.map | DESERT | 90×103 | `247ee2aa2c2b12d1` | 268718 | 1838/96458/25/202811 | 37/1922/32/262144 | 30/1555/32/262144 | 839/44033/6/46920 = 3·170·92 |
 | c1a02md.map | NEWURBAN | 105×110 | `222a4983b9dd7c62` | 376458 | 2486/130508/31/252894 | 29/1513/32/262144 | 33/1723/32/262144 | 1093/57367/8/58200 = 3·200·97 |
 | moonpatr.map | LUNAR | 60×62 | `b95c3dc97b8a71df` | 115102 | 740/38825/10/81162 | 19/951/32/262144 | 18/915/32/262144 | 330/17316/3/17316 = 3·111·52 |
-| 城墙之战.map | URBAN | 90×90 | `bfa85ec60aae9841` | 189438 | 1529/80240/22/177210 (=11·16110, no tail — community producer) | 27/1368/32/262144 | 35/1815/32/262144 | 482/25067/7/48600 then anomalous final chunk (§5 producer variant) |
+| 城郊之战.map | URBAN | 90×90 | `bfa85ec60aae9841` | 189438 | 1529/80240/22/177210 (=11·16110, no tail — community producer) | 27/1368/32/262144 | 35/1815/32/262144 | 482/25067/7/48600 then anomalous final chunk (§5 producer variant) |
 
 Tile-stream stats per sample: record counts all equal `(2W−1)·H`; `tile = −1` counts 371/503/1286/1142/52/958; z ranges 0-7 / 2-9 / 2-6 / 0-12 / 0-3 / 0-8; sub_tile max 44/23/44/44/24/27; **zero pad bytes violated in 0 records of any sample**.
 

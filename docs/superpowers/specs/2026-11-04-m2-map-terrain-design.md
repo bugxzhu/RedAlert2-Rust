@@ -55,7 +55,10 @@ Overlay 是固定 512×512 网格;Preview 是裸 RGB 非 packed SHP。)
   IsoMapPack5/PreviewPack = **LZO1X**,OverlayPack/OverlayDataPack = **LCW**(复用 lcw_decode;
   "IsoMapPack5"的 5 即 codec id)。**解码前按声明尺寸做最小载荷预检**(size_in==0/超界、
   size_out==0/>8192 拒绝;聚合输出上界预检:overlay 恒 262144;瓦片流 ≤ 11·(2W−1)·H+4 且
-  %11∈{0,4};W+H 语料极值 898),堵 M1b 终审顺延的内存尖峰类问题。
+  %11∈{0,4};W+H 语料极值 499 —— 勘误 2026-11-04 pre-flight:原引研究文档的 898 系
+  [Preview] 段 `Size=` 误读为 [Map] 尺寸,[Map] 锚定重扫全语料 max W+H=499(避暑山庄
+  399×100),最大解压瓦片流 943,738 B(2+1=3.map 272×158),详见研究文档 §12 勘误块),
+  堵 M1b 终审顺延的内存尖峰类问题。
   7 张图 PreviewPack 尾部截断 base64 组:保留前缀、缺字节按"无预览"处理不报错。
 - `mapdoc.rs` — 地图 INI 形态适配:复用 `IniDocument`,按普查裁决落地 7 项适配
   (段头尾随注释、值内 `;` 截断语义(原版 atoi 风格取前缀)、GBK 容错解码、
