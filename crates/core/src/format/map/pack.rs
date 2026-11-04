@@ -97,9 +97,8 @@ pub fn base64_decode_lenient(text: &str) -> Vec<u8> {
     let mut out = Vec::with_capacity(keep / 4 * 3 + 3);
     let mut acc = 0u32;
     let mut nbits = 0u32;
-    for &b in &kept[..keep] {
-        let v = b64_val(b).expect("已预过滤") as u32;
-        acc = (acc << 6) | v;
+    for v in kept[..keep].iter().copied().filter_map(b64_val) {
+        acc = (acc << 6) | v as u32;
         nbits += 6;
         if nbits >= 8 {
             nbits -= 8;
@@ -196,13 +195,10 @@ pub fn decode_pack_section(
     let mut sp = 0usize;
     let mut chunks = 0usize;
     while sp < blob.len() {
-        if blob.len() - sp < 4 {
-            break; // lenient 尾部残头;严格段已被预检拒绝
-        }
         let size_in = u16::from_le_bytes([blob[sp], blob[sp + 1]]) as usize;
         let size_out = u16::from_le_bytes([blob[sp + 2], blob[sp + 3]]) as usize;
         if size_in == 0 || size_in > blob.len() - sp - 4 {
-            break; // 同上,防御性
+            break; // 防御性
         }
         if size_out == 0 || size_out > 8192 {
             if lenient {
@@ -231,8 +227,7 @@ pub fn decode_pack_section(
                     Ok(())
                 }
             }),
-            PackCodec::Lcw => {
-                let consumed = lcw_decode_consumed(payload, &mut out)?;
+            PackCodec::Lcw => lcw_decode_consumed(payload, &mut out).and_then(|consumed| {
                 if consumed != size_in {
                     Err(FormatError::Invalid(format!(
                         "LCW 消耗 {consumed} != 块头 size_in {size_in}"
@@ -245,7 +240,7 @@ pub fn decode_pack_section(
                 } else {
                     Ok(())
                 }
-            }
+            }),
         };
         match check {
             Ok(()) => {
