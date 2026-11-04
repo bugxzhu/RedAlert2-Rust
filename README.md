@@ -20,6 +20,16 @@ INI、PAL、SHP(TS/RA2,RLEZeroTS)、TMP(RA2 剧场布局)、CSF、
 AUD(IMA ADPCM,XCC 变体步长表)、VXL、HVA。
 规格依据见 `docs/superpowers/research/`,实施计划见 `docs/superpowers/plans/`。
 
+## 地图层(M2)
+
+`ra2-core::format::map` 现可解析任意用户自有 `.map`:四个包段
+(IsoMapPack5/PreviewPack = LZO1X,Overlay 双段 = LCW)全解码,
+瓦片网格/双层覆盖/预览位图/六类对象段结构化,logic 段 tokenize 保留,
+[Digest] 读取不校验;807 张真实地图全量解析零 panic。`tools/ra2-map`
+提供 `info` 与 `extract-tile`(60×30 菱形占位渲染;tile→TMP 真位图
+解析归 M3)。规格依据见 `docs/superpowers/research/`,实施计划见
+`docs/superpowers/plans/`。
+
 ## ra2-mix
 
     ra2-mix list <file.mix>
