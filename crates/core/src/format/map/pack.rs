@@ -11,9 +11,12 @@
 //! 3. codec 按段名由调用方分派:IsoMapPack5/PreviewPack = LZO1X,overlay
 //!    双段 = LCW("IsoMapPack5" 的 5 即 codec id);
 //! 4. 预检(研究 §8,内存尖峰加固——所有大分配之前完成):size_in==0/越界
-//!    拒;size_out==0/>8192 拒(仅 PreviewPack 例外:停在首个坏块保留干净
-//!    前缀);聚合 Σsize_out 按段核对(overlay 恒 262144;瓦片流 ≤ 上界且
-//!    %11 ∈ {0,4};预览不以 Σ 预拒但逐块累加超过 max_out 即停)。
+//!    拒;size_out==0/>8192 拒;聚合 Σsize_out 按段核对(overlay 恒 262144;
+//!    瓦片流 ≤ 上界且 %11 ∈ {0,4};预览不以 Σ 预拒但逐块累加超过 max_out
+//!    即停)。**仅 PreviewPack 例外:任何块头非法(残块头/size_in==0/越界/
+//!    size_out 异常)都停在首个坏块保留干净前缀**——Task 9 语料复核发现
+//!    DDLY 组尾部垃圾块的 size_in 谎报/清零会先于 size_out 检查触发硬错,
+//!    与研究 §5 的截断容忍契约相悖,已按契约修正。
 
 use crate::format::lcw::lcw_decode_consumed;
 use crate::format::lzo1x::lzo1x_decode;
@@ -80,6 +83,11 @@ pub fn base64_decode(text: &str) -> Result<Vec<u8>, FormatError> {
 
 /// 预览段专用:在首个非法字符处截断(保留前缀),并丢弃尾部不完整的
 /// 4 字符组(普查 §4.5:7 张 DDLY 图尾组被截断——"drop the partial tail group")。
+///
+/// 偏差记录(Task 9):实现最初按"非 = 字符数"取整组,会把带 `=` 补位的
+/// 合法尾组(`AAA=`/`AA==`)的数据字符当残组丢掉——合成 mini 图的 14 B
+/// 预览 blob(base64 20 字符、19 数据字符)被截成 12 B 而露馅。残组应指
+/// 截断产生的 **不足 4 字符** 的尾部,故按字符组(含 `=`)取整。
 pub fn base64_decode_lenient(text: &str) -> Vec<u8> {
     let mut end = text.len();
     for (i, &b) in text.as_bytes().iter().enumerate() {
@@ -88,11 +96,7 @@ pub fn base64_decode_lenient(text: &str) -> Vec<u8> {
             break;
         }
     }
-    let kept: Vec<u8> = text.as_bytes()[..end]
-        .iter()
-        .copied()
-        .filter(|&b| b != b'=')
-        .collect();
+    let kept = &text.as_bytes()[..end];
     let keep = kept.len() - kept.len() % 4;
     let mut out = Vec::with_capacity(keep / 4 * 3 + 3);
     let mut acc = 0u32;
@@ -139,6 +143,9 @@ pub fn decode_pack_section(
     let mut sp = 0usize;
     while sp < blob.len() {
         if blob.len() - sp < 4 {
+            if lenient {
+                break; // 预览:截断残块头不足 4 字节——保留干净前缀
+            }
             return Err(FormatError::UnexpectedEof {
                 needed: 4,
                 remaining: blob.len() - sp,
@@ -147,9 +154,15 @@ pub fn decode_pack_section(
         let size_in = u16::from_le_bytes([blob[sp], blob[sp + 1]]) as usize;
         let size_out = u16::from_le_bytes([blob[sp + 2], blob[sp + 3]]) as usize;
         if size_in == 0 {
+            if lenient {
+                break; // 预览:异常末块(肉人大战6人图 偏移 10893)——保留干净前缀
+            }
             return Err(FormatError::Invalid(format!("块偏移 {sp} 的 size_in == 0")));
         }
         if size_in > blob.len() - sp - 4 {
+            if lenient {
+                break; // 预览:尾部垃圾块头谎报 size_in(3V3平原防守图 16384)——保留干净前缀
+            }
             return Err(FormatError::UnexpectedEof {
                 needed: size_in,
                 remaining: blob.len() - sp - 4,
@@ -195,6 +208,9 @@ pub fn decode_pack_section(
     let mut sp = 0usize;
     let mut chunks = 0usize;
     while sp < blob.len() {
+        if blob.len() - sp < 4 {
+            break; // 防御性:预检 lenient 停在残块头时同步停
+        }
         let size_in = u16::from_le_bytes([blob[sp], blob[sp + 1]]) as usize;
         let size_out = u16::from_le_bytes([blob[sp + 2], blob[sp + 3]]) as usize;
         if size_in == 0 || size_in > blob.len() - sp - 4 {
@@ -416,31 +432,25 @@ mod tests {
 
     #[test]
     fn rejects_size_in_zero() {
-        // 补 2 字节使 blob 长度为 3 的倍数:Preview 走 lenient base64 会丢弃
-        // 尾部残组,4 字节 blob(补位后 %3=1)经 lenient 解码会缩成 3 字节,
-        // 触发 UnexpectedEof 而非本测的 size_in==0 → Invalid
+        // size_in==0 严格段硬拒(Invalid)。偏差记录(Task 9):原测借 Preview
+        // 绕开 Tiles 模数检查,但预检 lenient 契约修正后该异常在 Preview 下
+        // 停块保前缀(肉人大战6人图),改用无 Σ 语义纠缠的 Exact 绑定钉住
+        // 严格路径;Preview 下的停块行为由 preview_lenient_stops_at_* 钉住。
         let blob = [0u8, 0, 8, 0, 0x11, 0x00]; // size_in=0
         let entries = entries_of(&blob);
         assert!(matches!(
-            decode_pack_section(
-                &entries,
-                PackCodec::Lzo1x,
-                PackBound::Preview { max_out: 8 }
-            ),
+            decode_pack_section(&entries, PackCodec::Lzo1x, PackBound::Exact(8)),
             Err(FormatError::Invalid(_))
         ));
     }
 
     #[test]
     fn rejects_size_in_beyond_stream() {
+        // size_in 越流严格段硬拒(UnexpectedEof);偏差记录同上(Task 9)
         let blob = [100, 0, 8, 0, 1, 2]; // size_in=100 但只剩 2 字节载荷
         let entries = entries_of(&blob);
         assert!(matches!(
-            decode_pack_section(
-                &entries,
-                PackCodec::Lzo1x,
-                PackBound::Preview { max_out: 8 }
-            ),
+            decode_pack_section(&entries, PackCodec::Lzo1x, PackBound::Exact(8)),
             Err(FormatError::UnexpectedEof { .. })
         ));
     }
@@ -575,6 +585,39 @@ mod tests {
         assert_eq!(sec.data.len(), 22);
         assert_eq!(sec.chunks, 2);
         assert!(sec.data.starts_with(b"aaaaaaaaaaaa"));
+    }
+
+    #[test]
+    fn preview_lenient_stops_at_size_in_lie() {
+        // DDLY 组尾部垃圾块(Task 9 语料复核):干净块后跟谎报 size_in 的坏块
+        // (16384 > 剩余)→ 停块保留干净前缀(预检 lenient 与解码循环同契约)
+        let mut blob = Vec::new();
+        push_lzo_chunk(&mut blob, &[b'a'; 12]);
+        blob.extend_from_slice(&16384u16.to_le_bytes()); // size_in 谎报
+        blob.extend_from_slice(&8u16.to_le_bytes());
+        blob.extend_from_slice(&[0x11; 6]);
+        let entries = entries_of(&blob);
+        let sec = decode_pack_section(
+            &entries,
+            PackCodec::Lzo1x,
+            PackBound::Preview { max_out: 12 },
+        )
+        .unwrap();
+        assert_eq!(sec.data.len(), 12);
+        assert_eq!(sec.chunks, 1);
+        // size_in == 0 的同族异常(肉人大战6人图)同样停块
+        let mut blob = Vec::new();
+        push_lzo_chunk(&mut blob, &[b'b'; 10]);
+        blob.extend_from_slice(&0u16.to_le_bytes());
+        blob.extend_from_slice(&8u16.to_le_bytes());
+        let entries = entries_of(&blob);
+        let sec = decode_pack_section(
+            &entries,
+            PackCodec::Lzo1x,
+            PackBound::Preview { max_out: 10 },
+        )
+        .unwrap();
+        assert_eq!(sec.data.len(), 10);
     }
 
     #[test]

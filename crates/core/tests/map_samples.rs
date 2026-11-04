@@ -41,3 +41,137 @@ fn decode_policy_over_real_maps() {
     assert!(name.contains('\u{FFFD}'), "截断序列应产生替换符: {name}");
     assert!(name.contains("玩家援"));
 }
+
+/// 递归收集 RA2_ASSETS_DIR 下全部 .map(807 张;普查 §1 的语料构成)。
+fn map_files() -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    let mut stack = vec![assets_dir()];
+    while let Some(dir) = stack.pop() {
+        let entries =
+            std::fs::read_dir(&dir).unwrap_or_else(|e| panic!("读目录 {}: {e}", dir.display()));
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                stack.push(p);
+            } else if p.extension().map(|x| x == "map").unwrap_or(false) {
+                out.push(p);
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+use ra2_core::format::map::meta::Theater;
+use ra2_core::format::map::MapFile;
+
+/// 全量遍历(spec §6-3):807 张图全部 Ok、零 panic。容错规则已覆盖全部
+/// 已知语料异常(截断预览/缺段/损坏行/孤儿行/负尺寸),逐张 Err 即失败;
+/// 失败时打印首张问题图名与错误,便于定位。
+#[test]
+#[ignore]
+fn corpus_walk_807_maps_all_parse() {
+    use ra2_core::format::FormatError;
+    let mut total = 0usize;
+    let mut errs: Vec<(String, FormatError)> = Vec::new();
+    for p in map_files() {
+        total += 1;
+        let data = std::fs::read(&p).unwrap_or_else(|e| panic!("读 {}: {e}", p.display()));
+        if let Err(e) = MapFile::parse(&data) {
+            errs.push((p.display().to_string(), e));
+        }
+    }
+    assert_eq!(total, 807, "语料应有 807 张 .map(游戏目录变动时同步更新)");
+    assert!(
+        errs.is_empty(),
+        "{} 张解析失败;首张:{}\n{:#?}",
+        errs.len(),
+        errs[0].0,
+        errs[0].1
+    );
+}
+
+/// 剧场交叉验证(spec §6-5):SNOW 图的最大 tile 索引 < snow.mix +
+/// SNOWMD.MIX 的 TMP 瓦片总数(2026-11-04 实测 343 文件/6804 瓦片 +
+/// 81 文件/3212 瓦片 = 10016 → 上界 10015;语料实测最大 963)。
+#[test]
+#[ignore]
+fn snow_tile_index_within_theater_mix_capacity() {
+    use ra2_core::format::mix::MixArchive;
+    fn tmp_tile_capacity(mix: &MixArchive) -> usize {
+        let mut total = 0usize;
+        for e in mix.entries() {
+            let b = mix.read_by_id(e.id).unwrap();
+            if b.len() >= 8 && b[0] == 0 && b[1] == 0 {
+                let tiles = b[6] as usize | ((b[7] as usize) << 8);
+                if 0 < tiles && tiles < 4096 {
+                    total += tiles;
+                }
+            }
+        }
+        total
+    }
+    let ra2 = MixArchive::parse(std::fs::read(assets_dir().join("ra2.mix")).unwrap()).unwrap();
+    let snow = MixArchive::parse(ra2.read("SNOW.MIX").unwrap().to_vec()).unwrap();
+    let ra2md = MixArchive::parse(std::fs::read(assets_dir().join("ra2md.mix")).unwrap()).unwrap();
+    let snowmd = MixArchive::parse(ra2md.read("SNOWMD.MIX").unwrap().to_vec()).unwrap();
+    let capacity = tmp_tile_capacity(&snow) + tmp_tile_capacity(&snowmd);
+    assert_eq!(capacity, 10016);
+
+    let mut snow_maps = 0usize;
+    let mut max_tile: i16 = -1;
+    for p in map_files() {
+        let data = std::fs::read(&p).unwrap();
+        let Ok(m) = MapFile::parse(&data) else {
+            continue;
+        };
+        if m.map_meta.theater != Theater::Snow {
+            continue;
+        }
+        snow_maps += 1;
+        if let Some(t) = m.tiles.max_tile_index() {
+            max_tile = max_tile.max(t);
+        }
+    }
+    assert!(
+        snow_maps >= 100,
+        "Maps/** 下应有 106 张 SNOW 图,实得 {snow_maps}"
+    );
+    assert!(max_tile >= 0, "至少一张 SNOW 图应有瓦片");
+    assert!(
+        (max_tile as i64) < capacity as i64,
+        "tile {max_tile} 超过剧场瓦片容量 {capacity}"
+    );
+    assert_eq!(max_tile, 963, "语料实测最大 SNOW tile(交流意见.map)");
+}
+
+/// 截断 PreviewPack 组(规格依据 §8):7 张 DDLY 图在完整位图后带异常尾块,
+/// 干净前缀恰为 3·pw·ph → 全部 Ok 且预览 Some(2026-11-04 逐图复核);
+/// templateMap.map(无 IsoMapPack5)预览前缀 0 → None。
+#[test]
+#[ignore]
+fn truncated_preview_group_degrades_gracefully() {
+    for rel in [
+        "Maps/DDLY/一夫当关万夫莫开.map",
+        "Maps/DDLY/城郊之战.map",
+        "Maps/DDLY/对峙一块地.map",
+        "Maps/DDLY/终极茅厕.map",
+        "Maps/DDLY/肉人大作战八人图.map",
+        "Maps/DDLY/肉人大战6人图.map",
+        "Maps/DDLY/降维打击三人防守图.map",
+    ] {
+        let m = MapFile::parse(&read_map(rel)).unwrap_or_else(|e| panic!("{rel}: {e:?}"));
+        let img = m
+            .preview
+            .as_ref()
+            .unwrap_or_else(|| panic!("{rel} 的干净前缀应为完整位图"));
+        assert_eq!(img.rgb.len(), 3 * img.width as usize * img.height as usize);
+    }
+    let m = MapFile::parse(&read_map(
+        "Resources/RandomMapGenerator_RA2/templateMap.map",
+    ))
+    .unwrap();
+    assert!(m.tiles.is_empty());
+    assert!(m.preview.is_none());
+    assert!(m.pack_stats.preview_truncated);
+}
