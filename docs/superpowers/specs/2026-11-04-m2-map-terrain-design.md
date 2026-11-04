@@ -40,16 +40,37 @@ RA2/YR 地图(`.map`/`.yrm`)是 INI 文本与二进制包段的混合格式。M1
 
 ## 4. 模块结构(`crates/core/src/format/map/`)
 
-- `pack.rs` — 包段容器层解码,四段共用:自定义 base64 变体解码 → u32 尺寸块循环 →
-  LCW 解压(复用 `crate::format::lcw::lcw_decode`;IsoMapPack5 块内 5 字节小头,精确布局研究定)。
-  **解码前按声明尺寸做最小载荷预检**(声明解压尺寸 vs 输入字节数的合理性上界),
-  堵 M1b 终审顺延的 with_capacity 内存尖峰类问题。
-- `mapdoc.rs` — 地图 INI 形态适配:复用 `IniDocument`;研究阶段实测 .map 特有形态
-  (自定义段名、CRLF、编号键、同段重复键、段外游离行)是否需要扩展。
-- `iso.rs` — `TileCell { x, y, tile_index, subtile, height, flags }`(字段精确语义研究定),
-  稀疏存储 + 按 (x,y) 查询;[Map] 段的 Size 给出合法界。
-- `overlay.rs` — OverlayPack(每格 overlay 类型)+ OverlayDataPack(帧/状态)对齐为双层结构。
-- `preview.rs` — PreviewPack 解包后的数据暴露(形态研究定:packed SHP 或其他)。
+(2026-11-04 研究后增补:完整规格依据见两份研究文档;与初稿的差异——
+新增 `lzo1x.rs` 解码器;codec 按段名分派非按块标志;4 字节块头非 5 字节;
+Overlay 是固定 512×512 网格;Preview 是裸 RGB 非 packed SHP。)
+
+- `crates/core/src/format/lzo1x.rs`(map 外层,与 lcw.rs 平级)— LZO1X 安全解压器,
+  从规范语义重写(参照 Linux 内核 lzo1x_decompress_safe 的算法族与输入校验要点,
+  CVE-2014-4608 家族/2017 加固清单为边界检查核对表),零第三方依赖;
+  版本头(17,ver)有无都接受;EOF 由 m_pos==op 判定;上溢/下溢映射 FormatError。
+  独立单测覆盖全部操作码族(字面量串/短匹配 M2/M1 扩展/M3/M4/尾部 next 字面量)。
+
+- `pack.rs` — 包段容器层解码,四段共用:编号 key 按序拼接 → **标准 RFC 4648 base64** 解码
+  → 4 字节块头循环 {u16 size_in, u16 size_out, payload} → 按段名分派 codec:
+  IsoMapPack5/PreviewPack = **LZO1X**,OverlayPack/OverlayDataPack = **LCW**(复用 lcw_decode;
+  "IsoMapPack5"的 5 即 codec id)。**解码前按声明尺寸做最小载荷预检**(size_in==0/超界、
+  size_out==0/>8192 拒绝;聚合输出上界预检:overlay 恒 262144;瓦片流 ≤ 11·(2W−1)·H+4 且
+  %11∈{0,4};W+H 语料极值 898),堵 M1b 终审顺延的内存尖峰类问题。
+  7 张图 PreviewPack 尾部截断 base64 组:保留前缀、缺字节按"无预览"处理不报错。
+- `mapdoc.rs` — 地图 INI 形态适配:复用 `IniDocument`,按普查裁决落地 7 项适配
+  (段头尾随注释、值内 `;` 截断语义(原版 atoi 风格取前缀)、GBK 容错解码、
+  RMG 孤儿行策略、有序条目不变量、重复键 last-wins/重复段合并锁定测试、
+  缺 [Digest]/[IsoMapPack5] 等容错)——逐项依据与实例文件见
+  docs/superpowers/research/2026-11-04-map-ini-survey.md 适配清单。
+- `iso.rs` — 11 字节记录流 {u16 x, u16 y, i16 tile(−1=无瓦片), 3×零垫, u8 sub_tile, u8 z, 零垫},
+  **以存储的 (x,y) 为权威键**(4 张 TS 代官方图省略 void 格;EA/FinalAlert 产图尾部 4 零字节
+  终止符可有可无),稀疏存储 + 按 (x,y) 查询;[Map] Size 给出合法界;瓦片与 [Terrain]/
+  [Structures]/[Waypoints] 同一菱形坐标系(恒等,无偏移)。
+- `overlay.rs` — 解压后恒 262144 B = 行主序 512×512(x=i&511, y=i>>9)双层:
+  OverlayPack=类型,OverlayDataPack=帧/状态;**0xFF 类型格下的陈旧 data 字节必须忽略**
+  (46/540 真图携带,非对齐缺陷)。
+- `preview.rs` — 裸 24bpp RGB 位图,无头,EA 图精确 3·[Preview]W·H;字节原样暴露
+  (RGB/BGR 与行序 M2 不裁决,渲染时定)。
 - `objects.rs` — 对象段 → `MapObject { 段类别, 原始键, 解析字段(坐标/类型/所属/朝向等) }`;
   通用编号键(0=,1=,…)与坐标键(地形段)两种形态都处理。
 - `mod.rs` — `MapFile::parse(data: &[u8]) -> Result<MapFile, FormatError>` 总入口;
@@ -90,7 +111,7 @@ RA2/YR 地图(`.map`/`.yrm`)是 INI 文本与二进制包段的混合格式。M1
 (扩展现有 format_samples.rs 模式到地图);全量遍历单独一个 ignored 测试,失败时输出
 首张问题图名与错误,便于定位。
 
-## 9. 研究问题(spec 批准后、写计划前,研究代理产出文档)
+## 9. 研究问题(已于 2026-11-04 由两个研究代理产出文档回答)
 
 1. pack 编码精确规格:base64 变体字母表/位序、块头字段序、LCW 与原始块的选择位
    (XCC GPL 源 + ModEnc + 真图字节三方互证);
