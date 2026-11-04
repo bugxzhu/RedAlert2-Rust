@@ -9,6 +9,7 @@ pub mod csf;
 pub mod hva;
 pub mod ini;
 pub mod lcw;
+pub mod lzo1x;
 pub mod mix;
 pub mod pal;
 pub mod rle_zero_ts;
