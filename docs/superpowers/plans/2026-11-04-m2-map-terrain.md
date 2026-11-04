@@ -18,13 +18,13 @@
 本计划编写时(2026-11-04)又对全部测试常量做了独立字节取证:计划作者实现了 Rust 版 LZO1X 移植并跑通 18 个手造操作码向量,再用它对 §13 五张指纹图(c1a01md/c1a03md/c2s02md/c1a02md/moonpatr)做四包段全链解码,chunk 数与解压字节数**全部逐项复现**(如 c1a01md iso 17 块/135117 B、preview 4 块/28674 B = 3·162·59,overlay 32 块/262144 B);Vector A 另与研究会话留下的 Python 实现(`pack_probe.lzo1x_decompress`,540 图 34.4M 记录语料扫过)双实现对拍一致。新证据与两处研究文档勘误如下,**冲突一律按下述结论执行**:
 
 1. **指纹图名勘误**:研究文档 §13 的"城墙之战.map"实为 `Maps\DDLY\城郊之战.map`(sha16 `bfa85ec60aae9841`,URBAN 90×90,§13 整行指纹逐项复现)。DDLY 下另有一张尺寸完全相同的同名近义图,勿混用;本计划一律用 `城郊之战.map`。
-2. **语料尺寸极值勘误**:研究文档 §8-4/§12 的"W+H = 898(798×100)"与"最大瓦片流 1,889,210 B(2+1=3.map 544×158)"不成立——全 807 图实测 **max(W+H) = 499**(`Maps\MadHQ\避暑山庄.map` 与 `非常之观.map`,均 399×100),**最大瓦片流 = `2+1=3.map`(272×158)943,738 B** = 11·543·158+4。这不动任何判定公式([Map]Size 逐图给界),只影响文档里的"语料极值"表述与 300×300 兜底常量的裕量判断(943,738 < 1,976,704 ✓)。
+2. **语料尺寸极值勘误**:研究文档 §8-4/§12 的"W+H = 898(798×100)"与"最大瓦片流 1,889,210 B(2+1=3.map 544×158)"不成立——全 807 图实测 **max(W+H) = 499**(`Maps\MadHQ\避暑山庄.map` 与 `非常之观.map`,均 399×100),**最大瓦片流 = `2+1=3.map`(272×158)943,734 B** = 11·543·158(勘误:原记 943,738 = 11·543·158+4 系"+4 零尾"假设,终审 T11 独立复测该图**无零尾**,实为 943,734,见研究 §12 勘误二段)。这不动任何判定公式([Map]Size 逐图给界),只影响文档里的"语料极值"表述与 300×300 兜底常量的裕量判断(943,734 < 1,976,704 ✓)。
 3. **真实 LZO 向量(Vector A)**:`Maps\Standard\moonpatr.map` 的 `[PreviewPack]` 第 3 块(末块):块头 (size_in, size_out) = **(940, 932)**,载荷 940 字节(十六进制全文钉死在 Task 1 测试常量 `REAL_PREVIEW_CHUNK_HEX`),解压产出 932 字节,产出 SHA-256 前 16 hex = **`2805014e9aa0295d`**,产出首 16 字节 = `94 92 7e 90 8e 7b 7a 89 7e 61 88 7a 68 88 7d 85`;载荷 sha16 = `9ead542168482906`(仅供复核)。该块是"255 游程扩展字面量 + EOF 标记"的天然实例(载荷首 4 字节 `00 00 00 95`:token 0 + 3 个零 + 终止字节 0x95 → 3·255+15+149+3 = 932)。Rust/Python 双实现产出哈希一致。
 4. **OverlayPack chunk 0 手工样例复现**:`c1a01md.map` 的 `[OverlayPack]` 首块原始字节 `09 00 00 20 81 FF FE FE 1F FF 81 FF 80`(size_in=9, size_out=8192;LCW:1 字面量 FF + 8190 填充 FF + 1 字面量 FF + 终止)与研究文档 §2.1 逐字节一致,已钉进 Task 4 测试。
 5. **IsoMapPack5 记录样例复现**:`c1a01md` 块 0 块头 `eb 0f 00 20`(3819, 8192),载荷操作码 `00 05` 后 rec0 = `57 00 01 00 3c 01 00 00 01 02 00`(x=87,y=1,tile=316,sub=1,z=2)、rec1 = `56 00 02 00 3c 01 00 00 02 02 00`;末记录 `48 00 9d 00 00 00 00 00 00 02 00` 后跟 4 零尾巴 `00 00 00 00`。与研究文档 §3.5 一致。
 6. **剧场调色板链**(extract-tile 用):`ra2.mix`(明文,22 项)→ 嵌套调色板库 **id `0x3B5A96DE`**(明文,44 项,按名可读)→ `isotem.pal`/`isosno.pal`/`isourb.pal` 各 768 B,sha16 分别 **`5d6e40fcd11a592a` / `9f411f95251d7e62` / `b1f4c15b7b911307`**;`temperat.pal` == `snow.pal`(sha16 `5903b69868b84f49`)。**`isodes.pal`/`isoubn.pal`/`isolun.pal` 在本机安装中缺席**(研究文档 §14-1 结论复现)——extract-tile 对 DESERT/NEWURBAN/LUNAR 图报错退出 1(提示缺调色板),验收用 TEMPERATE/SNOW/URBAN 图。
 7. **剧场交叉验证上界**(spec §6-5):`snow.mix`(ra2.mix,379 项)含 **343 个 RA2 TMP 文件、共 6804 瓦片**;`SNOWMD.MIX`(ra2md.mix,82 项)含 81 个 TMP、3212 瓦片;合计 **10016 瓦片 → 合法 tile 索引上界 10015**。语料 106 张 SNOW 图实测最大 tile = **963**(`Maps\MadHQ\交流意见.map`)。
-8. **截断 PreviewPack 7 张名单**(%4 == 2,全在 `Maps\DDLY`):`一夫当关万夫莫开` / `城郊之战` / `对峙一块地` / `终极茅厕` / `肉人大作战八人图` / `肉人大战6人图` / `降维打击三人防守图`。其中**城郊之战的干净前缀恰为 48600 B = 3·180·90**(7 个干净块后跟异常末块 size_in=8、size_out=56994)——按 §5 契约它仍产出完整预览;其余 6 张前缀不足 3·pw·ph → "无预览"。全 807 图 base64 字符集零违规;缺 `[Digest]` 的 3 张 = `小块地之田野之隔` / `小块地宝箱大战` / `沙漠坦克遭遇战4人图`;缺 `[IsoMapPack5]` 的 1 张 = `Resources\RandomMapGenerator_RA2\templateMap.map`。
+8. **截断 PreviewPack 7 张名单**(%4 == 2,全在 `Maps\DDLY`):`一夫当关万夫莫开` / `城郊之战` / `对峙一块地` / `终极茅厕` / `肉人大作战八人图` / `肉人大战6人图` / `降维打击三人防守图`。其中**城郊之战的干净前缀恰为 48600 B = 3·180·90**(7 个干净块后跟异常末块 size_in=8、size_out=56994)——按 §5 契约它仍产出完整预览。(勘误:原预测"其余 6 张前缀不足 3·pw·ph → 无预览"**已证伪**——T9 走查+T10/T11 审查逐图复核,7 张乃至全部 18 张 DDLY 异常尾图干净前缀**全部恰好** 3·pw·ph,全部产出完整预览;全语料前缀不足者仅 templateMap 一张,见 map_samples.rs 测试注释与 mod.rs PackStats doc。)全 807 图 base64 字符集零违规;缺 `[Digest]` 的 3 张 = `小块地之田野之隔` / `小块地宝箱大战` / `沙漠坦克遭遇战4人图`;缺 `[IsoMapPack5]` 的 1 张 = `Resources\RandomMapGenerator_RA2\templateMap.map`。
 9. **INI 取证补钉**:勇士与巨龙.map 第 6187 行原文 `69=NeutralGAWEAT,256,138,264,0,None,1,0,1,0,0,None,None,None,1,0`(16 字段,owner+type 丢逗号),该图 `[Structures]` 共 160 项;RMG `1,1,1,1,01,spawn.map` 首个段前孤儿键值行 **44** 行、瓦片记录 1770 = 59·30 精确;`indicator.map` `[Map]Size=0,0,1,1`、瓦片记录恰 1 条、`[Preview]Size=0,0,2,1` → 预览恰 6 B;`fcrash_backup.map` 无 `[Basic]` 段(38 段)。digest 样本 `1=qSt1w6I0r+9EWkfWl7XFZMt0Vo4=` 解码 20 B:hex `a92b75c3a234afef445a47d697b5c564cb74568e`。
 10. **GBK 字节钉死**(Task 3 测试向量):`城市海啸.map` 的 Name 原始 GBK 字节 `ba a3 87 5b` → "海嘯";`随机地图.map` 是真 UTF-8 `e9 9a 8f e6 9c ba e5 9c b0 e5 9b be` → "随机地图"(证明 UTF-8 优先序不可反);`分而治之.map` Name `[4]分而治之` = `5b 34 5d b7 d6 b6 f8 d6 ce d6 ae`;截断序列 `31 cd e6 bc d2 d4 ae be`(`终极海战防守图.map`)→ 有损解码 `1玩家援\u{FFFD}`(Python gbk/replace 对拍一致)。
 11. **ISOTEMP.MIX 形态**(决定 extract-tile 设计):`ISOTEMP.MIX` 不是单文件 blob,而是 **1035 项的摘要位 MIX**(flags=0x00010000;ISODES/ISOSNOW/ISOURB 同构)。tile 索引 → 具体位图的映射(首项 51984 B、内部为递增 u32 偏移表)留 M3 取证;因此 M2 的 `extract-tile` 输出该格 60×30 菱形的**调色板占位渲染**(填充色 = 剧场 ISO 调色板第 `tile % 256` 项),在 `--help` 与 README 中如实注明,真瓦片位图归 M3。
@@ -40,6 +40,11 @@
 - 确定性:核心解析器无 HashMap/HashSet(稀疏 (x,y) 索引用"排序 Vec + 二分");f32 仅作 [Lighting] 字段存取,不做浮点决策。
 - Rust 不在 PATH:所有 cargo/rustc 命令前 `export PATH="$HOME/.cargo/bin:$PATH"`。
 - 计数基线(2026-11-04 实测):`cargo test --workspace` = **85 合成**(79 core + 6 cli);`RA2_ASSETS_DIR=... cargo test --workspace -- --ignored` = **21**(13 format_samples + 1 m1b_acceptance + 7 mix_integration)。每任务 Run 步骤给出期望累计值,最终 **合成 188 / ignored 27**。
+  > **计数勘误(2026-11-04,Task 3 审查 Critical 修复)**:gbk_lossy lead 0xFF 越界 panic 的修复附带 1 个回归测试 → Task 3 后合成计数 118+1=**119**,此后每任务 Run 步骤的期望累计值整体 +1(136→137 / 146→147 / 151→152 / 160→161 / 169→170 / 180→181 / 188→**189**);ignored 链不变(22/25/26/27)。
+  >
+  > **计数勘误 2(2026-11-04,Task 9 实现时实证,控制器已独立复核)**:Task 9 简报 Step-2 实含 **12 个测试函数而非 11**(mod.rs 12 个 `#[test]`,控制器 grep 复核),且 pack.rs lenient 契约修复附带 1 个回归钉(`preview_lenient_stops_at_size_in_lie`,pack.rs:591)→ Task 9 后合成计数 170+12+1=**183**(非 181);ignored 链 22+3(map_samples 新增 corpus_walk/snow_tile_index/truncated_preview_group)=**25**(原计划此处为 22)。后续链整体移位:Task 10 期望合成 **191**/ignored 26,Task 11 合成 191/ignored 27。终账以 **191/27** 为准。
+  >
+  > **计数勘误 3(2026-11-04,Task 10 审查 Important-1 修复)**:调色板 6 位→8 位换算修复(pal.rs 新增 `rgb8` + 测试 `converts_6bit_to_8bit`,提交 6df81fe)附带 1 个合成测试 → Task 10 后合成计数 191+1=**192**;ignored 不变(26)。终账修正为 **192/27**。
 - 每个任务收尾:`cargo fmt --all`、`cargo clippy --all-targets -- -D warnings`、`cargo test --workspace` 全绿后才 commit;涉真实资产的任务另跑 `RA2_ASSETS_DIR="E:\hongjing\Reunion 2023" cargo test --workspace -- --ignored` 全绿。clippy 新近 deny 级 lint 靠预避免(切片分块用 `as_chunks` 风格,循环用迭代器/zip;不得 `#[allow]` 压告警)。
 - commit 用 conventional commits(中文描述可),每条 commit 末尾附:`Co-Authored-By: Claude Code <noreply@anthropic.com>`(用第二个 `-m` 传入)。
 - 零第三方依赖;SHA-256 只出现在测试(自写 FIPS 180-4 实现);`[Digest]` 只读取不校验。
@@ -239,7 +244,7 @@ pub fn lzo1x_decode(src: &[u8], out_cap: usize, out: &mut Vec<u8>) -> Result<usi
                 t = 3;
             }
         } else if t >= 64 {
-            // M2:2 字节常规短匹配,长度 (t>>5)+1,偏移 1..=2044
+            // M2:2 字节常规短匹配,长度 (t>>5)+1,偏移 1..=2048
             next = t & 3;
             if src.len() - ip < 1 {
                 return Err(eof(1, 0));
@@ -1183,7 +1188,8 @@ fn read_map(rel: &str) -> Vec<u8> {
 
 /// GBK/UTF-8 解码策略的真图锁定(普查 §1 编码普查 + 规格依据 §10):
 /// 随机地图.map 是真 UTF-8;城市海啸.map 的 Name 是 GBK;终极海战防守图.map
-/// 的 Name 带截断 GBK 序列。三者都必须无损解析出 IniDocument 且 Name 正确。
+/// 的对象段 Name 带截断 GBK 序列([Basic] Name 为 ASCII 拼音,勘误见下)。
+/// 三者都必须无损解析出 IniDocument 且 Name 正确。
 #[test]
 #[ignore]
 fn decode_policy_over_real_maps() {
@@ -1193,15 +1199,17 @@ fn decode_policy_over_real_maps() {
     // GBK 回退
     let doc = IniDocument::parse(&decode_map_text(&read_map("Maps/MadHQ/城市海啸.map")));
     assert_eq!(doc.value("Basic", "Name"), Some("海嘯"));
-    // 截断 GBK:整文件有损解码后仍成档(Name 是该文件的第二个重复键,last-wins)
+    // 截断 GBK:整文件有损解码后仍成档
     let doc = IniDocument::parse(&decode_map_text(&read_map("Maps/DDLY/终极海战防守图.map")));
-    let name = doc.value("Basic", "Name").expect("应有 Name");
+    assert_eq!(doc.value("Basic", "Name"), Some("jiangweidajihaizhanfangshoutu"));
+    // 截断序列在该图的对象段(如 [01000014])Name,不在 [Basic]
+    let name = doc.value("01000014", "Name").expect("对象段应有 Name");
     assert!(name.contains('\u{FFFD}'), "截断序列应产生替换符: {name}");
     assert!(name.contains("玩家援"));
 }
 ```
 
-注意:终极海战防守图.map 有**两个** `Name=` 键(首个为 ASCII 拼音,第二个为 GBK 截断序列)——IniDocument last-wins 取后者,这正是 Task 2 锁定行为的真实样本;该图其余部分正常解析。
+> **勘误(2026-11-04,Task 3 实现时实证)**:原文称该图 [Basic] 有"两个 `Name=` 键(首个 ASCII 拼音,第二个 GBK 截断)——last-wins 真实样本"。实测(False):[Basic] 仅一个 `Name=jiangweidajihaizhanfangshoutu`(ASCII 拼音);截断 GBK `31 cd e6 bc d2 d4 ae be` 的 Name 在**对象段**(如 `[01000014]`),全文件任一段内 0 重复键(与普查 §8"全语料 0 重复键"一致)。last-wins 行为仅由 Task 2 合成测试锁定,无真实语料样本。测试已按真实事实改写(见 map_samples.rs 提交 8017297)。
 
 Run: `RA2_ASSETS_DIR="E:\hongjing\Reunion 2023" cargo test -p ra2-core --test map_samples -- --ignored`
 Expected: 1 passed(ignored 22/27 进度)

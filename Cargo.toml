@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/core", "tools/ra2-mix"]
+members = ["crates/core", "tools/ra2-mix", "tools/ra2-map"]
 
 [workspace.package]
 version = "0.1.0"
