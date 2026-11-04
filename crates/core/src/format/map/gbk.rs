@@ -19,7 +19,7 @@ pub fn gbk_lossy(data: &[u8]) -> String {
         } else if b == 0x80 {
             out.push('\u{20AC}');
             i += 1;
-        } else if i + 1 < data.len() {
+        } else if b <= 0xFE && i + 1 < data.len() {
             let trail = data[i + 1];
             if (0x40..=0xFE).contains(&trail) && trail != 0x7F {
                 let t = if trail < 0x7F {
@@ -75,5 +75,13 @@ mod tests {
     fn invalid_trail_consumes_pair_and_replaces() {
         // trail 0x7F 非法:成对消费、单个替换,后续字节不受影响
         assert_eq!(gbk_lossy(&[b'A', 0xC7, 0x7F, b'B']), "A\u{FFFD}B");
+    }
+
+    #[test]
+    fn lead_ff_is_replacement_not_panic() {
+        // 审查 Critical 回归锁定:lead 0xFF 不是合法 GBK 前导,越界索引曾 panic
+        assert_eq!(gbk_lossy(&[0xFF, 0x41]), "\u{FFFD}A");
+        assert_eq!(gbk_lossy(&[0xFF, 0xFE]), "\u{FFFD}\u{FFFD}");
+        assert_eq!(gbk_lossy(&[0xFF, 0xFF, 0x81, 0xFE]), "\u{FFFD}\u{FFFD}侢");
     }
 }

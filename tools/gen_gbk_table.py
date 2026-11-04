@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-only
 """生成 CP936(GBK)双字节区 → Unicode 查找表(地图名有损解码用)。
 
 用法:python tools/gen_gbk_table.py crates/core/src/format/map/gbk_table.rs
