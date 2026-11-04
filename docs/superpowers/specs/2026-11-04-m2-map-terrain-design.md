@@ -26,7 +26,9 @@ RA2/YR 地图(`.map`/`.yrm`)是 INI 文本与二进制包段的混合格式。M1
 - `[Basic]`/`[Map]`/`[Lighting]`/`[Header]` 等元数据段结构化读取
 - `[IsoMapPack5]` → 等距瓦片网格;`[OverlayPack]`+`[OverlayDataPack]` → 双层数组;
   `[PreviewPack]` → 预览图数据(内部格式研究定)
-- `[Structures]`/`[Units]`/`[Infantry]`/`[Aircraft]`/`[Terrain]`/`[Smudges]` → 类型化对象列表
+- `[Structures]`/`[Units]`/`[Infantry]`/`[Aircraft]`/`[Terrain]`/`[Smudge]` → 类型化对象列表
+  (勘误 2026-11-04:真实段名是 `[Smudge]`,全语料 41 张含此段、0 张 `[Smudges]`——INI 普查
+  docs/superpowers/research/2026-11-04-map-ini-survey.md 裁决)
 - `[Triggers]`/`[Events]`/`[Actions]`/`[Tags]`/`[TeamTypes]`/`[TaskForces]`/`[ScriptTypes]`/
   `[VariableNames]`/`[Waypoints]` 等 → 按段保留原始键值行(tokenize,不解码语义)
 - `[Digest]` 读取字节但**不校验**(结构记录进研究文档)
