@@ -7,6 +7,13 @@ name = "ra2-core"
 version = "0.1.0"
 
 [[package]]
+name = "ra2-map"
+version = "0.1.0"
+dependencies = [
+ "ra2-core",
+]
+
+[[package]]
 name = "ra2-mix"
 version = "0.1.0"
 dependencies = [

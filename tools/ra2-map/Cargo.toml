@@ -1,0 +1,13 @@
+[package]
+name = "ra2-map"
+description = "Map parsing command-line tool (info/extract-tile)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "ra2-map"
+path = "src/main.rs"
+
+[dependencies]
+ra2-core = { path = "../../crates/core" }
