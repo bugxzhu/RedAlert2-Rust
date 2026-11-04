@@ -171,7 +171,8 @@ pub fn lzo1x_decode(src: &[u8], out_cap: usize, out: &mut Vec<u8>) -> Result<usi
                 t = 3;
             }
         } else if t >= 64 {
-            // M2:2 字节常规短匹配,长度 (t>>5)+1,偏移 1..=2044
+            // M2:2 字节常规短匹配,长度 (t>>5)+1,偏移 1..=2048(= M2_MAX_OFFSET,
+            // 1 + (t>>2)&7 最大 7 + 扩展字节最大 255<<3 = 2040)
             next = t & 3;
             if src.len() - ip < 1 {
                 return Err(eof(1, 0));
