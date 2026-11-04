@@ -9,5 +9,6 @@
 
 pub mod gbk;
 pub mod gbk_table;
+pub mod iso;
 pub mod mapdoc;
 pub mod pack;
