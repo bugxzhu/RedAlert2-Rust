@@ -26,7 +26,7 @@ impl OverlayLayers {
     /// 两层解压字节各须恰为 262144(不在中途截断/补零)。
     ///
     /// 经堆上 `Vec` 转换(`Box::try_from(Vec)` 原地重解释),避免 debug 构建
-    /// 把 512KB 数组经栈中转导致测试线程溢栈。
+    /// 把每层 256 KiB 数组(双层峰值 >1.5 MiB 栈临时)经栈中转导致测试线程溢栈。
     pub fn parse(types: &[u8], frames: &[u8]) -> Result<Self, FormatError> {
         let types: Box<[u8; OVERLAY_GRID_LEN]> =
             Box::try_from(types.to_vec()).map_err(|v: Vec<u8>| {
