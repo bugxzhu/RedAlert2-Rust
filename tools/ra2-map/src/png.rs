@@ -5,7 +5,7 @@
 //! 结构:8 字节签名 + IHDR(8bit/RGB 彩色类型 2/无隔行)+ 单 IDAT
 //! (zlib store:0x78 0x01 + deflate 存储块 + Adler32)+ IEND。
 //! CRC32 复用 `ra2_core::format::crc::crc32`(zlib 多项式,PNG 同款);
-//! zlib/adler/存储块布局语义源自 PNG 规范(RFC 2085/ISO-15948)与 zlib
+//! zlib/adler/存储块布局语义源自 PNG 规范(RFC 2083/ISO-15948)与 zlib
 //! 格式定义,与 XCC 的 LCW/LZO 解包链无关(此处只产出新文件,不复用 EA 位)。
 
 use ra2_core::format::crc::crc32;

@@ -181,10 +181,10 @@ fn run_extract_tile(
             return ExitCode::from(1);
         }
     };
-    // 60×30 菱形占位渲染:填充 = palette[tile%256];菱形外黑(0,0,0)。
-    // 菱形谓词 |2cx-59| + 2·|2cy-29| ≤ 60(中心 (29.5,14.5),确定性、可复现)
+    // 60×30 菱形占位渲染:填充 = palette[tile%256](6 位→8 位换算);菱形外
+    // 黑(0,0,0)。菱形谓词 |2cx-59| + 2·|2cy-29| ≤ 60(中心 (29.5,14.5),确定性、可复现)
     let idx = tile.tile as usize % 256;
-    let [r, g, b] = palette.rgb[idx];
+    let [r, g, b] = palette.rgb8(idx);
     let (w, h) = (60u32, 30u32);
     let mut rgb = vec![0u8; 3 * w as usize * h as usize];
     for cy in 0..h as usize {
