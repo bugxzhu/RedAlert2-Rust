@@ -17,6 +17,9 @@ use super::bytes::ByteReader;
 use super::rle_zero_ts::rle_zero_ts_decode;
 use super::FormatError;
 
+/// 语料 SHP 最大画布 253×242(研究 §8);上限给 277 倍余量防炸(spec"分配前上界")。
+pub(crate) const MAX_SHP_CANVAS_PIXELS: usize = 4096 * 4096;
+
 /// 单帧帧头(字段语义按研究 §4 重标)。
 pub struct ShpTsFrameHeader {
     pub x: i16,
@@ -131,6 +134,12 @@ impl ShpTsFile {
                 let start = h.data_offset as usize;
                 let span = end - start;
                 let need = h.cx as usize * h.cy as usize;
+                if need > MAX_SHP_CANVAS_PIXELS {
+                    return Err(FormatError::Invalid(format!(
+                        "SHP 画布 {}x{} 共 {need} 像素,超分配前上界 {MAX_SHP_CANVAS_PIXELS}",
+                        h.cx, h.cy
+                    )));
+                }
                 let src = &data[start..end];
                 let mut pixels = Vec::with_capacity(need);
                 // 判别式(研究 §4/§6):先严格 RLE;失败且 span==cx·cy → RAW;
@@ -319,6 +328,21 @@ mod tests {
         assert!(matches!(
             ShpTsFile::parse(&data),
             Err(FormatError::UnexpectedEof { .. })
+        ));
+    }
+
+    #[test]
+    fn rejects_canvas_over_allocation_cap() {
+        // 敌意 ~40 B blob 谎报画布 65535×65535(u16² ≈ 4.29e9 像素):
+        // 分配前上界拦截,恒 Err,不得先做巨型 Vec 预留
+        let data = shp_bytes(
+            (65535, 65535),
+            &[frame_header(0, 0, 65535, 65535, 3, [0; 4], 0, 32)],
+            &[0u8; 8],
+        );
+        assert!(matches!(
+            ShpTsFile::parse(&data),
+            Err(FormatError::Invalid(_))
         ));
     }
 }

@@ -12,6 +12,7 @@
 
 use super::bytes::ByteReader;
 use super::rle_zero_ts::rle_zero_ts_decode;
+use super::shp_ts::MAX_SHP_CANVAS_PIXELS;
 use super::FormatError;
 
 /// 单帧帧头(`alpha`/`zero2` 已读入校验/忽略,不存储)。
@@ -126,7 +127,14 @@ impl ShpFile {
                 let src = data.get(start..end).ok_or_else(|| {
                     FormatError::Invalid(format!("帧数据区间 {start}..{end} 越界"))
                 })?;
-                let mut pixels = Vec::with_capacity(h.cx as usize * h.cy as usize);
+                let need = h.cx as usize * h.cy as usize;
+                if need > MAX_SHP_CANVAS_PIXELS {
+                    return Err(FormatError::Invalid(format!(
+                        "SHP 画布 {}x{} 共 {need} 像素,超分配前上界 {MAX_SHP_CANVAS_PIXELS}",
+                        h.cx, h.cy
+                    )));
+                }
+                let mut pixels = Vec::with_capacity(need);
                 rle_zero_ts_decode(src, h.cx as usize, h.cy as usize, &mut pixels)?;
                 pixels
             } else {
@@ -254,6 +262,21 @@ mod tests {
     fn rejects_offset_before_table() {
         // offset 指向帧头表内部
         let data = shp_bytes((4, 2), &[frame_header(0, 0, 4, 2, 1, 16)], &[0u8; 8]);
+        assert!(matches!(
+            ShpFile::parse(&data),
+            Err(FormatError::Invalid(_))
+        ));
+    }
+
+    #[test]
+    fn rejects_canvas_over_allocation_cap() {
+        // 敌意 ~40 B blob 谎报画布 65535×65535:压缩帧分配前上界拦截,
+        // 恒 Err,不得先做巨型 Vec 预留
+        let data = shp_bytes(
+            (65535, 65535),
+            &[frame_header(0, 0, 65535, 65535, 3, 32)],
+            &[0u8; 8],
+        );
         assert!(matches!(
             ShpFile::parse(&data),
             Err(FormatError::Invalid(_))
