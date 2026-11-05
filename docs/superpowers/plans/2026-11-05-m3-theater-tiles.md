@@ -1604,11 +1604,20 @@ fn six_md_theater_inis_capacities_and_last_tiles_census() {
         let text = decode_map_text(blob);
         let ini = TheaterIni::parse(&text).unwrap_or_else(|e| panic!("{name}: {e}"));
         assert_eq!(ini.slot_count(), cap, "{name}");
-        assert!(!text.contains("LastTilesInSet"), "{name} 出现 LastTilesInSet(REA 勘误语料断言)");
+        // REA 断言的是"活键零出现";七份 INI 均带 ;LastTilesInSet = N 注释模板行
+        // (temperatmd 24 行,含 ;; 双分号变体)——注释行不计(2026-11-05 实证)
+        assert!(
+            !text.lines().any(|l| {
+                let t = l.trim_start();
+                !t.starts_with(';') && t.to_ascii_lowercase().contains("lasttilesinset")
+            }),
+            "{name} 出现活键 LastTilesInSet(REA 勘误语料断言;注释模板行不计)"
+        );
     }
-    // 脏数据实证:localmd urbannmd 的 TilesInSet=o(研究 §3)
+    // 脏数据实证:localmd urbannmd set0105 行=TilesInSet = o(等号两侧带空格,
+    // 2026-11-05 字节级实证;atoi→0,容量 1175 已由上方断言钉)
     let raw = String::from_utf8_lossy(localmd.read("urbannmd.ini").unwrap());
-    assert!(raw.contains("TilesInSet=o"), "set0105 脏数据应存在(研究 §3)");
+    assert!(raw.contains("TilesInSet = o"), "set0105 脏数据应存在(研究 §3)");
 }
 ```
 
