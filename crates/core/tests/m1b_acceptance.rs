@@ -8,7 +8,7 @@ use ra2_core::format::hva::HvaFile;
 use ra2_core::format::mix::MixArchive;
 use ra2_core::format::pal::Palette;
 use ra2_core::format::shp::ShpFile;
-use ra2_core::format::tmp::TmpRa2File;
+use ra2_core::format::shp_ts::ShpTsFile;
 use ra2_core::format::vxl::VxlFile;
 use ra2_core::format::FormatError;
 
@@ -45,12 +45,13 @@ fn m1b_full_pipeline_over_real_assets() {
     assert_eq!(shp.frames.len(), 8);
     assert!(shp.frames[0].pixels.iter().all(|&p| (p as usize) < 256)); // 调色板索引域
 
-    // 3) TMP:ra2.mix → snow.mix → burnt01.sno(按名;该库 LMD 名单裁决)
+    // 3) SHP(剧场装饰精灵,M1b 误判已纠正,研究 §4):ra2.mix → snow.mix → burnt01.sno
+    //    (按名;该库 LMD 名单裁决)
     let ra2 = load("ra2.mix");
     let snow = MixArchive::parse(ra2.read("snow.mix").unwrap().to_vec()).unwrap();
-    let tmp = TmpRa2File::parse(snow.read("burnt01.sno").unwrap()).unwrap();
-    assert_eq!(tmp.tiles.len(), 2);
-    assert_eq!(tmp.tiles[0].pixels.len(), 29 * 17);
+    let tmp = ShpTsFile::parse(snow.read("burnt01.sno").unwrap()).unwrap();
+    assert_eq!(tmp.frames.len(), 2);
+    assert_eq!(tmp.frames[0].pixels.len(), 29 * 17);
 
     // 4) CSF:langmd.mix → ra2md.csf
     let langmd = load("langmd.mix");
@@ -68,7 +69,7 @@ fn m1b_full_pipeline_over_real_assets() {
     assert_eq!(aud.samples.len(), 1586);
 
     // 6) 调色板:ra2md.mix → localmd.mix → mpyscrn.pal(768 字节,VXL/SHP 的邻近断言:
-    //    SHP/TMP/VXL 产出的都是 0..=255 调色板索引,渲染上色属 view 层)
+    //    SHP/TS SHP/VXL 产出的都是 0..=255 调色板索引,渲染上色属 view 层)
     let localmd = MixArchive::parse(ra2md.read("localmd.mix").unwrap().to_vec()).unwrap();
     let pal = Palette::parse(localmd.read("mpyscrn.pal").unwrap()).unwrap();
     assert_eq!(pal.rgba(0).len(), 4);
