@@ -2779,9 +2779,10 @@ fn m3_unshipped_slot_census_exact() {
 }
 
 /// 六剧场现存 TS TMP 全量零 panic(spec §6-2)+ snow 分布精确账
-/// (研究 §3-5:isosnow 459 + expandmd01#C31B4D61 323 + isosnomd 88 +
-/// snow.mix 16;886 现存)。TsTmpFile::parse 天然拒绝 SHP 形态(首 u16
-/// zero=0 → cbx=0 → Invalid),Ok 计数即"现存 TS TMP 文件数"。
+/// (研究 §3-5;INI 槽位反查口径:isosnow 459 + expandmd01#C31B4D61 323 +
+/// isosnomd 88 + snow.mix 16 = 886 现存 = 964 − 78 缺失)。
+/// 注意:容器结构判别(parse Ok 计数)口径**不可用**——isosnow 共 1013 条
+/// 含非瓦片精灵(2026-11-05 探针裁定)。
 /// 分布失配时:只读探针重测、更新常数、commit 注明,不得静默放宽(M2 惯例)。
 #[test]
 #[ignore]
@@ -2791,29 +2792,49 @@ fn m3_existing_tiles_parse_zero_panic_and_snow_distribution() {
         let data = std::fs::read(&p).unwrap_or_else(|e| panic!("读取 {}: {e}", p.display()));
         MixArchive::parse(data).expect("解析 MIX")
     }
-    fn ts_tmp_ok_count(mix: &MixArchive) -> usize {
-        mix.entries()
-            .iter()
-            .filter(|e| TsTmpFile::parse(mix.read_by_id(e.id).unwrap()).is_ok())
-            .count()
-    }
     let ra2 = load("ra2.mix");
     let ra2md = load("ra2md.mix");
     let expand = load("expandmd01.mix");
     let isosnow = MixArchive::parse(ra2.read("isosnow.mix").unwrap().to_vec()).unwrap();
-    let snow = MixArchive::parse(ra2.read("snow.mix").unwrap().to_vec()).unwrap();
+    let snow_mix = MixArchive::parse(ra2.read("snow.mix").unwrap().to_vec()).unwrap();
     let isosnomd = MixArchive::parse(ra2md.read("isosnomd.mix").unwrap().to_vec()).unwrap();
     let anon = MixArchive::parse(expand.read_by_id(0xC31B_4D61).unwrap().to_vec()).unwrap();
-    assert_eq!(
-        (
-            ts_tmp_ok_count(&isosnow),
-            ts_tmp_ok_count(&anon),
-            ts_tmp_ok_count(&isosnomd),
-            ts_tmp_ok_count(&snow),
-        ),
-        (459, 323, 88, 16),
-        "snow 现存瓦片容器分布(研究 §3-5)"
-    );
+    // snow 分布精确账(研究 §3-5;**INI 槽位反查口径**,2026-11-05 探针裁定:
+    // 964−78 缺失 = 886 现存 = isosnow 459 + expandmd01#C31B4D61 323 +
+    // isosnomd 88 + snow.mix 16。容器结构判别口径会数错——isosnow 共 1013 条
+    // 含非瓦片精灵——禁止用"容器内 parse Ok 计数"替代)
+    let assets = TheaterAssets::open(&assets_dir()).unwrap();
+    let snow_ini =
+        TheaterIni::parse(&decode_map_text(assets.lookup("snowmd.ini").unwrap())).unwrap();
+    let mut by_origin: BTreeMap<String, usize> = BTreeMap::new();
+    let mut missing = 0usize;
+    for idx in 0..snow_ini.slot_count() {
+        if let Some(SlotFile::File(name)) = snow_ini.file_name(idx, "sno") {
+            if assets.lookup(&name).is_some() {
+                let o = assets.origin(&name).unwrap().to_string();
+                *by_origin.entry(o).or_insert(0) += 1;
+            } else {
+                missing += 1;
+            }
+        }
+    }
+    assert_eq!(missing, 78, "snow 缺文件槽(与缺槽精确账测试互证)");
+    assert_eq!(by_origin.get("isosnow.mix"), Some(&459), "分布键: {by_origin:?}");
+    assert_eq!(by_origin.get("isosnomd.mix"), Some(&88));
+    assert_eq!(by_origin.get("snow.mix"), Some(&16));
+    let anon_n = by_origin
+        .iter()
+        .find(|(k, _)| k.starts_with("expandmd01.mix#"))
+        .map(|(_, &v)| v)
+        .unwrap_or(0);
+    assert_eq!(anon_n, 323, "匿名嵌套 mix 分布键: {by_origin:?}");
+    assert_eq!(by_origin.values().sum::<usize>(), 886);
+    // snow 四容器全量零 panic(分布口径之外的结构层兜底)
+    for mix in [&isosnow, &snow_mix, &isosnomd, &anon] {
+        for e in mix.entries() {
+            let _ = TsTmpFile::parse(mix.read_by_id(e.id).unwrap());
+        }
+    }
     // clear01.sno 字节闭合(spec §6-2 抽样):1872 = 16+4·1+52+900+900
     let clear = TsTmpFile::parse(isosnow.read("clear01.sno").unwrap()).unwrap();
     assert_eq!(clear.dims(), (1, 1, 60, 30));
@@ -2888,9 +2909,10 @@ fn m3_oracle_anchors() {
     assert_eq!(snow.file_name(963, "sno"), Some(SlotFile::File("clifxl04.sno".into())));
     assert!(assets.lookup("clifxl04.sno").is_some());
     assert_eq!(snow.set_of(963).unwrap().number, 82);
+    // [0] 锚:INI FileName 原文保留大小写(探针:snow[0]=Clear01.sno)
     assert_eq!(
         snow.file_name(0, "sno"),
-        Some(SlotFile::File("clear01.sno".into()))
+        Some(SlotFile::File("Clear01.sno".into()))
     );
     let nu = TheaterIni::parse(&decode_map_text(assets.lookup("urbannmd.ini").unwrap())).unwrap();
     assert_eq!(nu.file_name(1174, "ubn"), Some(SlotFile::File("sfbrdg01.ubn".into())));
