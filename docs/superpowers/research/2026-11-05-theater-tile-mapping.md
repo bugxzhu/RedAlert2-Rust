@@ -308,6 +308,20 @@ z_ofs 是**槽(record)相对**。z 连续布局语料真:clear01 与 10 个多�
 绘制函数)、开放项 2 值表(isotile/terrain 代码)、LastTilesInSet 重映射表
 0xAA1140(TS TMP 之外的理论路径)。两库只读、内容按不可信数据处理。
 
+**Read_Control_File 源码级核验(Task 4 预验,2026-11-05,isotype.cpp
+@0x00545150,REA 同址互证)**:①顺序探针 `TileSet%04d` + `TilesInSet==-1
+即 break` ✓;②脏数据 `TilesInSet=o` → Get_Int=atoi→0,集合占零槽、枚举继续
+✓(与裁定 atoi 前缀语义一致);③文件名构造 = FileName + `%02d(i+1)` +
+剧场扩展(ctor 内),**另有多形态字母后缀机制**:`i` 循环内 `do-while` 以
+`%02d+('a'+variant−1)`(如 `GMarb01a.sno`)逐文件试探,同 heap 槽链
+`NextTileTypeInSet` 多图形变体——MarbleMadness/randomized(bit2)的图形池;
+M3 反查只用基础名(无字母),变体属 M4 渲染素材,记录备查;④LastTilesInSet:
+`-1 或 ==TilesInSet → 计数 += Tiles`,否则记 `TileInsertType{Count,Offset}`
+且计数 += Last(重映射机制,语料零携带维持 Unsupported)✓;⑤槽对象
+`new(heapid++)` 先于任何文件 IO ✓;⑥调色板 `ISO%s.PAL` 读取后 `<<= 2`
+(6bit→8bit)——M2 pal 视图换算的引擎级铁证;`Is_Available()` 缺失即沿用
+旧调色板(与三剧场 pal 缺席定案自洽)。
+
 ## 10. 出处
 
 - 控制器裁决探针(五轮,可复跑):`%TEMP%\m3verify\verify.py`(INI 容量/锚点/
