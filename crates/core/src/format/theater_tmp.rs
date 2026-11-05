@@ -5,7 +5,7 @@
 //! 出处:裁决后研究 2026-11-05-theater-tile-mapping.md §4/§5 + 同日槽头宽度
 //! 勘误(ra2-decomp 匹配源码 + 语料字节双证;XCC GPL 的 t_tmp 结构语义重写,
 //! 注明出处;泄漏 TS/RA2 引擎源码未参考)。引擎侧:原版整体读入文件后**直接
-//! 内存投射**(`Load_Tile_Data`,gamemd 0x5B3C20 族;ra2-decomp
+//! 内存投射**(`Load_Tile_Data`,gamemd 0x00547020;ra2-decomp
 //! `src/isotype.cpp` @ 0x00547020 + `include/isotype.h` `IsoTileRecord`,
 //! `#pragma pack(4)`,GPL-3.0+),磁盘布局 ≡ 内存布局,故 52B 槽头字段全为
 //! i32 宽度;语料字节级闭合 2026-11-05 复核。

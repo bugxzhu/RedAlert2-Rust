@@ -15,7 +15,7 @@
 
 ## 格式层(M1b)
 
-`ra2-core::format` 现可解析:MIX(明文/SHA-1 摘要位索引;加密位明确拒绝)、
+`ra2-core::format` 现可解析:MIX(明文/摘要位索引(咨询位);加密位明确拒绝)、
 INI、PAL、SHP(TS/RA2,RLEZeroTS)、TMP(RA2 剧场布局)、CSF、
 AUD(IMA ADPCM,XCC 变体步长表)、VXL、HVA。
 规格依据见 `docs/superpowers/research/`,实施计划见 `docs/superpowers/plans/`。
@@ -32,8 +32,8 @@ AUD(IMA ADPCM,XCC 变体步长表)、VXL、HVA。
 
 ## 剧场瓦片层(M3)
 
-`ra2-core::format` 闭合瓦片解析链:MIX 摘要位 SHA-1 判别(修复幻影 digest
-错位;46 容器语料全绿)、`shp_ts`(TS SHP 帧,RAW 回退)、`theater_tmp`
+`ra2-core::format` 闭合瓦片解析链:MIX 摘要位引擎语义修复(位=工具侧咨询
+位,从不跳 20;旧格式显式拒绝)、`shp_ts`(TS SHP 帧,RAW 回退)、`theater_tmp`
 (TS TMP:16B 头/槽表/52B 头/RAW 菱形 + z)、`theater`(剧场 INI 顺序
 探查→全局索引→文件名反查;引擎挂载序资产装载器,递归嵌套 mix 下钻;
 六剧场常数表)。807 图全量 (theater, tile_id, sub)→文件闭合,缺文件槽
