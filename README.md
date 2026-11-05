@@ -30,6 +30,18 @@ AUD(IMA ADPCM,XCC 变体步长表)、VXL、HVA。
 解析归 M3)。规格依据见 `docs/superpowers/research/`,实施计划见
 `docs/superpowers/plans/`。
 
+## 剧场瓦片层(M3)
+
+`ra2-core::format` 闭合瓦片解析链:MIX 摘要位 SHA-1 判别(修复幻影 digest
+错位;46 容器语料全绿)、`shp_ts`(TS SHP 帧,RAW 回退)、`theater_tmp`
+(TS TMP:16B 头/槽表/52B 头/RAW 菱形 + z)、`theater`(剧场 INI 顺序
+探查→全局索引→文件名反查;引擎挂载序资产装载器,递归嵌套 mix 下钻;
+六剧场常数表)。807 图全量 (theater, tile_id, sub)→文件闭合,缺文件槽
+精确账(SNOW 78/NEWURBAN 383/LUNAR 44,语料零引用),六剧场现存瓦片
+全量零 panic。`ra2-map extract-tile` 输出真瓦片位图(2:1 等距菱形、
+调色板上色;YR 三剧场调色板缺席时退出 1)。规格依据见
+`docs/superpowers/research/`,实施计划见 `docs/superpowers/plans/`。
+
 ## ra2-mix
 
     ra2-mix list <file.mix>
