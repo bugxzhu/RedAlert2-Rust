@@ -1481,7 +1481,14 @@ mod tests {
 
     #[test]
     fn set_of_returns_info() {
-        let t = ini("[TileSet0081]\nName=USS Arizona\nFileName=ariz\nTilesInSet=1\n");
+        // 顺序探测语义下 0081 单段不可达(0000 缺即停)——用 81 个无键占位段
+        // 铺满 0000..0080(零贡献,同 missing_keys 路径),set0081 first_index=0
+        let mut text = String::new();
+        for i in 0..81 {
+            text.push_str(&format!("[TileSet{i:04}]\n"));
+        }
+        text.push_str("[TileSet0081]\nName=USS Arizona\nFileName=ariz\nTilesInSet=1\n");
+        let t = ini(&text);
         let s = t.set_of(0).unwrap();
         assert_eq!(s.number, 81);
         assert_eq!(s.name.as_deref(), Some("USS Arizona"));
