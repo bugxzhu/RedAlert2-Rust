@@ -99,8 +99,9 @@ fn rulesmd_ini_parses_from_mix() {
     assert!(doc.sections.len() > 100, "rulesmd.ini 应有大量节");
 }
 
-/// 真库裁决:ra2md.mix 内嵌的 isourbmd.mix(城市剧场库)flags=0x00010000,
-/// 索引后 20 字节摘要块、data_start += 20(body_size == 文件长-714 精确成立)。
+/// 真库裁决:ra2md.mix 内嵌的 isourbmd.mix(城市剧场库)flags=0x00010000。
+/// 摘要位为工具侧咨询位,引擎从不跳 20(REA 0x5B3C20 裁决);工具在 body_size
+/// 末尾预留 20 字节(body_size == 文件长-694-20 精确成立,条目偏移相对索引尾)。
 /// 实测 38 个摘要位嵌套库全部无 LMD,故按首条目 ID 读取(计划规格依据 §3)。
 /// 其 57 个条目内容不属于已验证的 RA2 TMP 布局(计划规格依据 §4),此处只裁决容器层。
 #[test]
@@ -147,4 +148,58 @@ fn real_mixes_with_encrypted_or_unknown_flags_are_unsupported() {
         MixArchive::parse(audiomd.to_vec()),
         Err(FormatError::Unsupported(_))
     ));
+}
+
+/// 递归枚举容器(与 2026-11-05 计划依据 §2 探针同口径):顶层 = RA2_ASSETS_DIR
+/// 下全部 *.mix(含 langmd/thememd/language/ares),每层把"能被 MixArchive::parse
+/// 接受"的条目作为嵌套容器下钻,深度 ≤4(顶层为深度 0)。摘要位修复后语料必须
+/// 全绿:46 容器 = 27 置位 + 19 朴素;引擎从不跳 20(REA 0x5B3C20 裁决),
+/// 置位容器数据区一律从索引尾起算。
+#[test]
+#[ignore]
+fn all_parseable_mix_containers_recurse_green() {
+    #[derive(Default)]
+    struct Stats {
+        total: usize,
+        flagged: usize,
+        plain: usize,
+    }
+    fn walk(data: &[u8], depth: usize, stats: &mut Stats) {
+        let mix = match MixArchive::parse(data.to_vec()) {
+            Ok(m) => m,
+            Err(_) => return,
+        };
+        stats.total += 1;
+        if mix.digest_flag() {
+            stats.flagged += 1;
+        } else {
+            stats.plain += 1;
+        }
+        if depth >= 4 {
+            return;
+        }
+        for e in mix.entries() {
+            let blob = mix.read_by_id(e.id).unwrap().to_vec();
+            walk(&blob, depth + 1, stats);
+        }
+    }
+    let mut stats = Stats::default();
+    let mut tops: Vec<std::path::PathBuf> = std::fs::read_dir(assets_dir())
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "mix"))
+        .collect();
+    tops.sort();
+    assert_eq!(tops.len(), 7, "顶层 mix 文件数(安装变动时同步更新)");
+    for p in &tops {
+        walk(&std::fs::read(p).unwrap(), 0, &mut stats);
+    }
+    assert_eq!(stats.total, 46, "可解析容器总数(依据 §2 遍历口径)");
+    assert_eq!(stats.flagged, 27, "摘要位置位容器数");
+    assert_eq!(stats.plain, 19, "朴素容器数");
+    // 内容锚:修复后 isosnow 的 clear01.sno 读取长度精确(错位 +20 时必然失败)
+    let ra2 = load("ra2.mix");
+    let isosnow = MixArchive::parse(ra2.read("isosnow.mix").unwrap().to_vec()).unwrap();
+    assert_eq!(isosnow.read("clear01.sno").unwrap().len(), 1_872);
 }
