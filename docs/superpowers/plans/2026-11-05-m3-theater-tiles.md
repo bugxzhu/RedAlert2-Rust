@@ -4,7 +4,7 @@
 
 **Goal:** 在 M2 地图层之上闭合瓦片解析链:`(theater, tile_id, sub_tile) → 剧场 INI 表 → 文件名 → MIX 按名查找(含递归嵌套)→ TS TMP 槽位 → RAW 菱形像素 → 剧场调色板 → PNG`,并清偿三项历史债:mix.rs 幻影 digest 错位(研究 §2)、tmp.rs 的 M1b 误判(实为 TS SHP,研究 §4)、T9 容量测试失真(10016→964/INI 语义)。
 
-**Architecture:** 延续 cargo workspace。`ra2-core` 新增 `format/sha1.rs`(FIPS 180-1 最小实现,仅 digest 判别用)、`format/theater_tmp.rs`(TS TMP 解析器)、`format/theater.rs`(TheaterIni 顺序探查 + 剧场常数表 + TheaterAssets 引擎挂载序装载器);`format/tmp.rs` 更名重定域为 `format/shp_ts.rs`(TS SHP 帧格式);`format/mix.rs` 摘要位判别修复。`tools/ra2-map` 的 extract-tile 从 60×30 占位升级为真瓦片渲染。工作分支 `feat/m3-theater-tiles`(已检出)。
+**Architecture:** 延续 cargo workspace。`ra2-core` 新增 `format/theater_tmp.rs`(TS TMP 解析器)、`format/theater.rs`(TheaterIni 顺序探查 + 剧场常数表 + TheaterAssets 引擎挂载序装载器);`format/tmp.rs` 更名重定域为 `format/shp_ts.rs`(TS SHP 帧格式);`format/mix.rs` 摘要位引擎语义修复(从不跳 20,REA 勘误)。`tools/ra2-map` 的 extract-tile 从 60×30 占位升级为真瓦片渲染。工作分支 `feat/m3-theater-tiles`(已检出)。
 
 **Tech Stack:** Rust stable(edition 2021),零第三方依赖,Git Bash / Windows。
 
@@ -12,7 +12,7 @@
 
 | Task | 一句话 |
 |---|---|
-| Task 1 | `sha1.rs`(FIPS 180-1)+ mix.rs 幻影 digest 判别修复(SHA-1 校验) + 46 容器语料 ignored 测试 |
+| Task 1 | mix.rs 摘要位引擎语义修复(从不跳 20 + 旧格式守卫;REA 勘误,sha1.rs 作废)+ 46 容器语料 ignored 测试 |
 | Task 2 | `tmp.rs` → `shp_ts.rs` 更名重定域(字段重标 + RAW 回退)+ M1b/format_samples 测试迁移 |
 | Task 3 | 新建 `theater_tmp.rs`:TS TMP 解析器(16B 头/槽表/52B 头/RAW 菱形/z,敌意守卫零 panic) |
 | Task 4 | 新建 `theater.rs` 前半:TheaterIni(顺序探查/atoi/blank 保留槽/LastTilesInSet)+ 剧场常数表 |
@@ -23,14 +23,14 @@
 
 ## Global Constraints
 
-- 许可证:GPL-3.0-only。XCC(GPL,Olaf van der Spek)派生的结构/算法(TS TMP 52B 头、SHP 帧头、mix digest 规则、SHA-1)**语义重写并注明出处**,不逐行翻译;已泄漏 TS/RA2 引擎源码是红线,绝不参考(本计划全部事实来自研究文档 + 语料探针 + REA 裁决)。
+- 许可证:GPL-3.0-only。XCC(GPL,Olaf van der Spek)派生的结构/算法(TS TMP 52B 头、SHP 帧头)**语义重写并注明出处**,不逐行翻译;已泄漏 TS/RA2 引擎源码是红线,绝不参考(本计划全部事实来自研究文档 + 语料探针 + REA 裁决)。
 - 每个文件第一行 `// SPDX-License-Identifier: GPL-3.0-only`。
-- 零第三方依赖(SHA-1 为本仓库自写 FIPS 180-1 实现,进 core——这是 M3 计划作者对 spec §4"对照 XCC 定稿语义"的裁决落地,见 依据 §2;M2 的"SHA-256 只在测试"约束不禁止自写 SHA-1)。
+- 零第三方依赖(原计划的自写 SHA-1 已随 REA 勘误作废——引擎不对 mix 数据做哈希,判别不再需要;见 Task 1 勘误块)。
 - 仓库不提交任何 EA 资产;`fixtures/` 已 gitignore;真实资产测试用 `RA2_ASSETS_DIR="E:\hongjing\Reunion 2023"`,`#[ignore]` 标注。
 - 零 panic:所有解析器切片/索引用 ByteReader 或显式边界检查;宽算术显式宽类型/checked(debug 溢出检查下也不 panic)。敌意输入(截断/谎报/越界)一律 Err,分配前先用输入长度推导上界。
 - 错误三变体语义不变:`UnexpectedEof` = 截断;`Unsupported` = 合法但本版本不支持(含 LastTilesInSet 引擎规则死路);`Invalid` = 畸形。
 - 零 IO 于解析器:所有 parse 接受字节切片;IO 收口在 `TheaterAssets::open`(库边界的装载器,spec §4 明文)与测试/CLI。核心解析器无 HashMap/HashSet(装载器索引用排序 Vec + 二分;测试代码可用 BTreeMap)。
-- 计数基线(2026-11-05 实测):`cargo test --workspace` = **192 合成**(core 178 + ra2-map 主程序单测 3 + ra2-map cli 5 + ra2-mix cli 6);`-- --ignored` = **27**(format_samples 13 + m1b 1 + m2 1 + map_samples 4 + mix_integration 7 + ra2-map cli 1)。每任务给出"新增 N 个"并全绿;M2 教训:不链式维护逐任务累计值,终账见 Task 8(合成 **228** / ignored **35**)。
+- 计数基线(2026-11-05 实测):`cargo test --workspace` = **192 合成**(core 178 + ra2-map 主程序单测 3 + ra2-map cli 5 + ra2-mix cli 6);`-- --ignored` = **27**(format_samples 13 + m1b 1 + m2 1 + map_samples 4 + mix_integration 7 + ra2-map cli 1)。每任务给出"新增 N 个"并全绿;M2 教训:不链式维护逐任务累计值,终账见 Task 8(合成 **224** / ignored **35**;Task 1 勘误后 228→224)。
 - 每任务收尾:`export PATH="$HOME/.cargo/bin:$PATH" && cargo fmt --all && cargo clippy --all-targets -- -D warnings && cargo test --workspace` 全绿后 commit;涉真资产的任务另跑 ignored 全绿。clippy 新 deny lint 用迭代器/`as_chunks` 风格预避免,不得 `#[allow]`。
 - commit 用 conventional commits,每条末尾附 `Co-Authored-By: Claude Code <noreply@anthropic.com>`(第二个 `-m` 传入)。
 - **REA 并行抽查(非本计划任务)**:gamemd.exe 抽查与实现并行进行;其第一批结论已作为"REA 勘误(2026-11-05)"并入本计划(Task 4 顺序探查/LastTilesInSet、Task 5 挂载序、剧场常数表出处 0x7E1B78)。后续 REA 发现与本计划冲突时,由控制器发勘误,实现者不自行改判定。
@@ -41,12 +41,12 @@
 以下常量均已由计划作者在本机资产(`E:\hongjing\Reunion 2023`,只读 python -I 探针)逐项复核,冲突时以本节为准:
 
 1. **测试计数基线**:合成 192 / ignored 27(上表分解;`cargo test --workspace` 复跑确认)。
-2. **mix 幻影 digest(研究 §2 的工程落地依据)**:递归遍历 7 个顶层 mix(ares/expandmd01/langmd/language/ra2/ra2md/thememd,深度 ≤4)共 **46 个可解析容器**;27 个 flags=0x00010000,19 个 flags=0。27 个摘要位容器**全部**满足:`min(entry.offset)==0`、`body_size == len − (10+12·count) − 20`、`max(offset+size) ≤ len − (10+12·count) − 20`——即**在头字段层面与"真摘要"容器结构不可分辨**(三种判别候选——offset 基准、body_size、跳 20 版面可行性——全部证伪)。XCC `mix_file.cpp` 的 `is_valid`(2026-11-05 取自 github.com/OlafvdSpek/xcc,GPL)只做尺寸一致性校验(`4+6+12·count+size+(checksum?20)==filesize`),对这 27 个容器同样误判为"有摘要"。结论:唯一可靠的判别 = **内容校验**(20 字节窗口 == SHA-1(索引表));Task 1 按此落地,语料 46 容器全绿 + 合成双分支。控制器简报中的"47 容器"与本计划遍历定义差 1(verify2 记账口径不同);本计划测试钉 46,遍历定义见 Task 1(顶层 = 目录下全部 `*.mix`,含 langmd/thememd/language/ares)。
+2. **mix 幻影 digest(研究 §2 的工程落地依据)**:递归遍历 7 个顶层 mix(ares/expandmd01/langmd/language/ra2/ra2md/thememd,深度 ≤4)共 **46 个可解析容器**;27 个 flags=0x00010000,19 个 flags=0。27 个摘要位容器**全部**满足:`min(entry.offset)==0`、`body_size == len − (10+12·count) − 20`、`max(offset+size) ≤ len − (10+12·count) − 20`——即**在头字段层面与"真摘要"容器结构不可分辨**(三种判别候选——offset 基准、body_size、跳 20 版面可行性——全部证伪)。XCC `mix_file.cpp` 的 `is_valid`(2026-11-05 取自 github.com/OlafvdSpek/xcc,GPL)只做尺寸一致性校验(`4+6+12·count+size+(checksum?20)==filesize`),对这 27 个容器同样误判为"有摘要"。~~结论:唯一可靠的判别 = 内容校验(20 字节窗口 == SHA-1(索引表))~~ **已被 REA 勘误推翻(见 Task 1 勘误块)**:引擎从不跳 20、从不哈希 mix 数据,位为咨询位——上述结构不可分性恰恰因为根本不存在两种形态。46 容器/27+19 口径不变,语义改为位记账。控制器简报中的"47 容器"与本计划遍历定义差 1(verify2 记账口径不同);本计划测试钉 46,遍历定义见 Task 1(顶层 = 目录下全部 `*.mix`,含 langmd/thememd/language/ares)。
 3. **剧场 INI(REA 勘误后语义)**:六份 md INI 均在 ra2md.mix→localmd.mix(urbannmd.ini 另有 expandmd01.mix 版):段名 `[TileSet0000]` 起**四位零填充、自 0 连续无缺口**(temperatmd 0000..0081/82 段、urbanmd 0000..0110/111、snowmd 0000..0082/83、desertmd 0000..0081/82、lunarmd 0000..0084/85、urbannmd(localmd) 0000..0121/122、urbannmd(expandmd01) 0000..0125/126)。`TilesInSet` atoi 前缀容量复算:**838 / 1081 / 964 / 726 / 198 / 1175(localmd) / 1189(expandmd01)**;`TilesInSet=o` 脏数据仅在 localmd 版 urbannmd 的 set0105。`LastTilesInSet` 在全部 8 份 INI(含 base 的 snow.ini)**零出现**(与 REA verify6 一致)。base `snow.ini`(ra2.mix→local.mix,22,603B)容量 **798** < 964(md 替换实证)。
 4. **甲骨文锚点复核(所在容器)**:`clear01.sno`→ra2.mix/isosnow(1,872B);`burnt01.sno`→ra2.mix/snow.mix(520B,帧 0 offset=56);`lobrdb08.sno`→snow.mix(帧 1 offset=152);`clifxl04.sno`→ra2md.mix/**isosnomd**;`sfbrdg01.ubn`→ra2md.mix/**isoubnmd**;`ariz01.tem`→ra2.mix/**isotemp**;`Crevas06.lun`→ra2md.mix/**isolunmd**。四锚点全部按 mix_name_id 跨容器可达。
 5. **TS TMP 画布普查**:全部剧场容器内 13,020 个 TS TMP 形态 blob 的 (cbx,cby,cx,cy) 直方图**全部 cx=60、cy=30**(cbx·cby 网格任意)——CLI 菱形渲染的 `cx == 2·cy` 前置在语料上 100% 成立。
 6. **调色板现状**:ra2.mix 内调色板库(id `0x3B5A96DE`,44 项,带 LMD 43 名)只有 `isotem.pal`/`isosno.pal`/`isourb.pal`;`isodes.pal`/`isoubn.pal`/`isolun.pal` **在全语料按名 + 全部 LMD 名单中均不存在**(候选名 19 个逐一探测为零)。因此 spec §6-6 的"snow/newurban/desert 各一图活体验收"按 **TEMPERATE/SNOW/URBAN 三剧场出 PNG + DESERT 负向退出 1** 落地(M2 契约延续;此为对 spec 的偏差登记,控制器复核后可勘误)。
-7. **SHA-1 测试向量**(hashlib 计算,钉入 Task 1):`sha1("abc")=a9993e364706816aba3e25717850c26c9cd0d89d`;`sha1("")=da39a3ee5e6b4b0d3255bfef95601890afd80709`;`sha1("a"×56)=c2db330f6083854c99d4b5bfb6e8f29f201be699`;`sha1("a"×64)=0098ba824b5c16427bd7a1122a5a442a25ec644d`;`sha1("a"×119)=ee971065aaa017e0632a8ca6c77bb3bf8b1dfc56`。
+7. ~~SHA-1 测试向量~~(**作废**,Task 1 勘误;留档勿删):`sha1("abc")=a9993e364706816aba3e25717850c26c9cd0d89d`;`sha1("")=da39a3ee5e6b4b0d3255bfef95601890afd80709`;`sha1("a"×56)=c2db330f6083854c99d4b5bfb6e8f29f201be699`;`sha1("a"×64)=0098ba824b5c16427bd7a1122a5a442a25ec644d`;`sha1("a"×119)=ee971065aaa017e0632a8ca6c77bb3bf8b1dfc56`。
 8. **expandmd01 匿名嵌套 mix**:id `0xC31B4D61`,1,018 项(内含 323 个 snow 瓦片,研究 §3-5),flags=0x00010000(幻影族)——递归下钻是**必需路径**。
 
 ## 规格歧义裁决(计划作者已定;控制器复核可推翻→勘误)
@@ -54,7 +54,7 @@
 | # | 歧义 | 裁决 |
 |---|---|---|
 | 1 | spec §6-6 要求 snow/newurban/desert 活体 PNG,但三张 YR 调色板实测缺席(依据 §6) | 活体 PNG 用 TEMPERATE/SNOW/URBAN;DESERT 图 extract-tile 退出 1(stderr 含"调色板"),作为负向活体检查 |
-| 2 | mix digest 判别规则(spec §4 留待"XCC 对照定稿") | SHA-1(索引表)校验:窗口 == SHA-1(data[10..10+12·count]) → 真摘要(跳 20);否则幻影(不跳)。XCC 尺寸规则不足,依据 §2 |
+| 2 | mix digest 判别规则(spec §4 留待"XCC 对照定稿") | ~~SHA-1(索引表)校验~~ → **勘误 2026-11-05(REA 二轮)**:引擎从不跳 20(位只存不读,0x5B3C20 全反汇编),规则=镜像引擎:从不跳;旧格式 word@0≠0 → Unsupported。见 Task 1 勘误块 |
 | 3 | 研究 §5 只列到 +0x28(40B),52B 头剩 12B 无字段名 | 40..52 暴露为 `tail: [u8; 12]` 原样字节,不校验 |
 | 4 | 47 vs 46 容器 | 钉 46,遍历定义写入测试注释(Task 1) |
 | 5 | MadHQ 残余界 | 白名单 ⊆ `Maps/MadHQ/`、违规图 ≤4、sub 越界格总数 ≤500(宽裕防增长界;首跑实测值记入测试注释) |
@@ -64,7 +64,50 @@
 
 ---
 
-### Task 1: SHA-1(`format/sha1.rs`)+ mix.rs 幻影 digest 判别修复 + 46 容器语料测试
+### Task 1: mix.rs 摘要位引擎语义修复(从不跳 20)+ 旧格式守卫 + 46 容器语料测试
+
+> **勘误 2026-11-05(控制器,REA digest 追问裁决)——本块推翻下文所有 SHA-1 内容,以本块为准:**
+>
+> REA 二轮对 gamemd.exe MixFileClass ctor(0x5B3C20)全量反汇编裁决:
+> ①引擎对 flags 位 0x00010000 **只读一次、存 +0x10、此后从不读**——构造器与
+> 全部 mix 子系统(0x5B3E90..0x5B6300 操作数扫描)无任何 +20 跳过;data_start
+> **无条件** = 10+12·count(0x5B3DD2 Seek 取当前位 + 零偏移);②引擎**从不**对
+> mix 数据跑 SHA-1(变换例程仅用于启动自完整性校验/网络,调用图枚举封闭);
+> ③位 0x00020000 置位时头+索引进 0x633xxx 流(非 Blowfish,身份未解;语料零
+> 样本);④**旧格式判别**:首个 dword 低 16 位 ≠ 0 → 6 字节头(count u16@0,
+> size u32@2,data_start=6+12·count,TS1 时代;语料零样本)。
+>
+> **结论:SHA-1(索引表)内容校验规则作废**——"幻影 digest"的真相是**引擎根本
+> 不认摘要块,位是工具侧咨询位**;本计划依据 §2 的"唯一可靠判别"前提(存在
+> 需要判别的两种形态)不成立。替换规则(引擎镜像):
+> - 新格式(word@0==0):data_start = 10+12·count,**从不因摘要位跳 20**;
+> - 旧格式(word@0≠0):`FormatError::Unsupported`(引擎支持但语料零样本,
+>   本里程碑不实现;显式拒绝防静默错解);
+> - 0x00020000:维持现行拒绝(Unsupported)。
+>
+> **交付面修订**:删除 `sha1.rs` 全部内容(Step 1 作废;零依赖原则下不留
+> 无用途代码);`MixDigestState`/`digest_state()` 改为 `digest_flag(&self) -> bool`
+> (咨询位透传,文档注明引擎从不消费);Step 3 三个测试换为:
+> 1. `digest_flag_does_not_skip_twenty`(TDD 红:0x10000 置位 + 索引后 20B 垃圾
+>    窗口,read 仍从 10+12·n 读到正确数据;旧实现此处必红)——保留下方
+>    `sample_phantom_mix` 样本,断言改为 `data_start()==10+12`、`read` 正确、
+>    `digest_flag()==true`;
+> 2. `old_format_header_rejected`(首 dword 低 16 位 ≠ 0 → Unsupported;合成
+>    6 字节头样本);
+> 3. `plain_mix_reports_no_digest_flag`(flags=0:`digest_flag()==false`)。
+> Step 5 语料测试语义重钉:46 容器全绿口径不变,但 match 三态改二态
+> (27 置位/19 未置位),`panic!("语料不应出现真摘要容器")` 一句删除,
+> clear01.sno 1872 内容锚不变。Step 4 TDD 红流程不变。Step 6 计数改:
+> 合成 **194**(192 − 删旧 1 + 新 3);ignored 28 不变。计划级终账
+> 228→**224**/35。XCC 出处注释改写:mix.rs 文档注明"摘要位为工具侧咨询位,
+> 引擎行为经 REA 0x5B3C20 反汇编裁决(gamemd YR 1.001),XCC 的 checksum
+> 概念不进入本项目判定路径"。
+>
+> **下文残留 SHA-1 字样一并作废**(Files 列表的 `Create: sha1.rs` 与
+> `pub mod sha1;`、Interfaces 的 `sha1()`/`MixDigestState`/`digest_state()`
+> 三行、Step 7 提交信息模板):Step 7 的 commit message 改为
+> `fix(core): MIX 摘要位改引擎语义(从不跳 20)+ 旧格式守卫;46 容器语料全绿`,
+> Files 列表只保留 mix.rs 与 mix_integration.rs 两行。
 
 **Files:**
 - Create: `crates/core/src/format/sha1.rs`
@@ -1559,7 +1602,7 @@ git commit -m "test(core): 六份 md 剧场 INI 真测(容量/LastTilesInSet 零
 - Modify: `crates/core/tests/theater_samples.rs`(追加 2 个 ignored 测试)
 
 **Interfaces:**
-- Consumes: `MixArchive`(Task 1 后形态,含 `data_start()`/`digest_state()`)、`mix_name_id`(crc.rs)、`FormatError`
+- Consumes: `MixArchive`(Task 1 后形态,含 `data_start()`/`digest_flag()`)、`mix_name_id`(crc.rs)、`FormatError`
 - Produces(供 Task 6/7/8 使用):
   - `pub const MAX_DESCEND_BYTES: usize = 256 * 1024 * 1024;`(嵌套下钻体量上限,spec"体量上限防炸";语料最大嵌套 35.7 MB 远在其下)
   - `pub struct TheaterAssets` + `open(assets_dir: &std::path::Path) -> Result<Self, FormatError>`
@@ -2004,7 +2047,7 @@ Expected: 3 passed(Task 4 的 1 + 新 2)
 - [ ] **Step 4: 全套回归后 Commit**
 
 Run: `cargo fmt --all && cargo clippy --all-targets -- -D warnings && cargo test --workspace`
-Expected: 全绿;合成 **228**(222 + 6)
+Expected: 全绿;合成 **224**(218 + 6)
 
 Run: `RA2_ASSETS_DIR="E:\hongjing\Reunion 2023" cargo test --workspace -- --ignored`
 Expected: 全绿;ignored **31**(29 + 2)
@@ -2082,7 +2125,7 @@ Expected: 4 passed(计数不变;改名重钉)
 - [ ] **Step 2: 全套回归后 Commit**
 
 Run: `cargo fmt --all && cargo clippy --all-targets -- -D warnings && cargo test --workspace`
-Expected: 全绿;合成 **228**(不变)
+Expected: 全绿;合成 **224**(不变)
 
 ```bash
 git add crates/core/tests/map_samples.rs
@@ -2489,7 +2532,7 @@ Expected: 1 passed(重写的活体测试)
 - [ ] **Step 4: 全套回归后 Commit**
 
 Run: `cargo fmt --all && cargo clippy --all-targets -- -D warnings && cargo test --workspace`
-Expected: 全绿;合成 **228**(不变)
+Expected: 全绿;合成 **224**(不变)
 
 ```bash
 git add tools/ra2-map/src/main.rs tools/ra2-map/tests/cli.rs
@@ -2868,7 +2911,7 @@ Expected: 3 passed(闭合 + 缺槽账 + 零 panic)再 `--test m3_acceptance m3_o
 - [ ] **Step 6: 终账(计划级完成定义核对)**
 
 Run: `export PATH="$HOME/.cargo/bin:$PATH" && cargo fmt --all --check && cargo clippy --all-targets -- -D warnings && cargo test --workspace`
-Expected: 全绿;**合成 228 passed**
+Expected: 全绿;**合成 224 passed**
 
 Run: `RA2_ASSETS_DIR="E:\hongjing\Reunion 2023" cargo test --workspace -- --ignored`
 Expected: 全绿;**ignored 35 passed**(既有 27 + mix_integration 1 + theater_samples 3 + m3_acceptance 4;map_samples 4 与 ra2-map cli 1 为改写,计数不变)
@@ -2885,7 +2928,7 @@ git commit -m "test(core): M3 里程碑验收(807 图闭合 + 缺文件槽精确
 
 ## 完成定义(计划级验收)
 
-1. `cargo test --workspace` 全绿:**228 个合成测试**(基线 192 + Task 1 的 4 + Task 2 的 3 + Task 3 的 13 + Task 4 的 10 + Task 5 的 6;Task 6/7/8 只改写不新增)。
+1. `cargo test --workspace` 全绿:**224 个合成测试**(基线 192 + Task 1 的 2 + Task 2 的 3 + Task 3 的 13 + Task 4 的 10 + Task 5 的 6;Task 6/7/8 只改写不新增;Task 1 勘误后由 4 改 2)。
    `RA2_ASSETS_DIR="E:\hongjing\Reunion 2023" cargo test --workspace -- --ignored` 全绿:**35 个真实资产测试**(基线 27 + Task 1 语料 1 + Task 4 真测 1 + Task 5 真测 2 + Task 8 验收 4;Task 2/6/7 为改写,计数不变)。
 2. `cargo fmt --all --check` 与 `cargo clippy --all-targets -- -D warnings` 零告警;debug 溢出检查下零 panic。
 3. spec §6 六项验收映射:1→Task 8 闭合测试(白名单界 + 类 A/B/C/E 零);2→Task 8 零 panic 扫描 + clear01 字节闭合;3→Task 1/3/4 敌意合成集(mix 双分支、TS TMP 守卫、INI 坏键);4→Task 8 甲骨文(Task 2 帧偏移、Task 4/8 六容量四锚点、Task 6 的 963=容量−1、md 替换 798<964);5→fmt/clippy/GPL/零依赖/资产零入库;6→Task 7 三剧场活体 PNG + DESERT 负向(歧义裁决 #1)。
@@ -2898,7 +2941,7 @@ git commit -m "test(core): M3 里程碑验收(807 图闭合 + 缺文件槽精确
 
 - §3 做清单:mix 幻影 digest 修复 → Task 1 ✓;tmp.rs 更名重定域 + RAW 回退 → Task 2 ✓;TS TMP 解析器 → Task 3 ✓;theater.rs 三层(INI 表/常数表/装载器)→ Task 4/5 ✓;T9 重钉 → Task 6 ✓;CLI extract-tile → Task 7 ✓;验收 → Task 8 ✓;REA 并行抽查 → 非代码交付物,勘误已并入(Global Constraints + Task 4/5 语义)✓
 - §3 不做清单:整图渲染/wgpu、z 着色与 terrain/ramp 语义枚举、overlay/smock、rules、写回、TS SHP remap/阴影、非 2:1 渲染(歧义裁决 #6)——全部排除且 CLI 对越界给出明确 stderr ✓
-- §4 模块结构:mix.rs(修复,判别信息进 digest_state 访问器,parse 入参形状不变)✓;shp_ts.rs(`ShpTsFile { zero, cx, cy, frames }`,帧头 24B 重标)✓;theater_tmp.rs(`TsTmpFile::parse`/`slot(i)`/`diamond_pixels()`/`z_data()`,守卫三件套)✓;theater.rs(TheaterIni 顺序探查、`slot_count()`/`file_name(idx)`/`set_of(idx)`、常数表、`TheaterAssets::open`)✓;map_samples T9 重钉 ✓;CLI ✓
+- §4 模块结构:mix.rs(修复,判别信息进 digest_flag 访问器——REA 勘误后为咨询位透传,parse 入参形状不变)✓;shp_ts.rs(`ShpTsFile { zero, cx, cy, frames }`,帧头 24B 重标)✓;theater_tmp.rs(`TsTmpFile::parse`/`slot(i)`/`diamond_pixels()`/`z_data()`,守卫三件套)✓;theater.rs(TheaterIni 顺序探查、`slot_count()`/`file_name(idx)`/`set_of(idx)`、常数表、`TheaterAssets::open`)✓;map_samples T9 重钉 ✓;CLI ✓
 - §6 验收:六项全落 Task 8(映射见完成定义)✓;§6-6 偏差(三剧场改 TEMPERATE/SNOW/URBAN + DESERT 负向)已在歧义裁决 #1 登记待控制器复核 ✓
 - §7 CLI 契约:签名与退出码 0/1/2 不变;stderr 链路诊断(剧场/容量/tile_id→文件名/槽位/来源容器)✓
 - §8 测试策略:合成单测(CI)+ 真资产 ignored + 自愈样本沿用;闭合失败输出首违例(panic 消息含图名+三元组)✓
@@ -2908,14 +2951,14 @@ git commit -m "test(core): M3 里程碑验收(807 图闭合 + 缺文件槽精确
 **跨任务类型一致性**:
 
 - `sha1(&[u8]) -> [u8; 20]`:Task 1 定义,Task 1 mix.rs 测试使用 ✓
-- `MixDigestState`/`digest_state()`/`data_start()`:Task 1 定义,Task 1 语料测试与 Task 5 walk 使用 ✓
+- `digest_flag()`/`data_start()`:Task 1 定义(REA 勘误后形态;原 MixDigestState 三态作废),Task 1 语料测试与 Task 5 walk 使用 ✓
 - `ShpTsFile::parse`:Task 2 定义,format_samples/m1b 迁移一致 ✓
 - `TsTmpFile::parse`/`dims()`/`slot_count()`/`slot(i)`/`diamond_pixels()`/`z_data()`:Task 3 定义,Task 7(CLI)/Task 8(闭合缓存、clear01 锚)一致 ✓
 - `TheaterIni::parse -> Result`/`slot_count()`/`file_name(idx, ext) -> Option<SlotFile>`/`set_of(idx) -> Option<TheaterSetInfo>`(owned,无借用):Task 4 定义,Task 5 真测/Task 6/Task 7/Task 8 一致 ✓
 - `theater_spec(Theater) -> TheaterSpec`:Task 4 定义,Task 7/8 一致 ✓
 - `TheaterAssets::open/lookup/lookup_id/origin`:Task 5 定义,Task 6 不用(显式链)、Task 7/8 一致 ✓
 - `SlotFile::{File, Reserved}`:Task 4 定义,Task 6/7/8 一致 ✓
-- 计数核对:合成 228 = 192 + 4 + 3 + 13 + 10 + 6;ignored 35 = 27 + 1 + 1 + 2 + 4——与各任务 Run 步骤期望值逐一相符 ✓
+- 计数核对:合成 224 = 192 + 2 + 3 + 13 + 10 + 6(Task 1 勘误后;原 228 系 SHA-1 方案);ignored 35 = 27 + 1 + 1 + 2 + 4——与各任务 Run 步骤期望值逐一相符 ✓
 
 **已知风险与执行提示**:
 

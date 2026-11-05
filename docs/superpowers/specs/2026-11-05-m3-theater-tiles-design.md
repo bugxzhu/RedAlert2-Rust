@@ -25,7 +25,8 @@ M1b 误判(实为 TS SHP)、T9 容量测试失真。
 ## 3. 范围 / 非范围
 
 **做**:
-- `mix.rs` 幻影 digest 判别修复(研究 §2:19 个置位无块容器全体错位 +20 的潜伏缺陷)
+- `mix.rs` 幻影 digest 修复(研究 §2 定案:摘要位=引擎不消费的咨询位,现行
+  "置位即跳 20"使全部置位容器错位 +20 的潜伏缺陷)
 - `tmp.rs` → `shp_ts.rs` 更名重定域(研究 §4:8B+24B = TS SHP 帧格式;
   RGBA/蓝通道/数据偏移字段重标;RAW 回退)
 - 新建 TS TMP 解析器 `theater_tmp.rs`(研究 §4/§5:16B 头/槽表/52B 头/RAW 菱形/z)
@@ -46,10 +47,16 @@ M1b 误判(实为 TS SHP)、T9 容量测试失真。
 
 ## 4. 模块结构(`crates/core/src/format/`)
 
-- `mix.rs`(修复)— 声明摘要位(flags&0x00010000)时的判别规则:**实现期对照
-  XCC 源定稿语义并语义重写+注明出处**;工程约束:①语料 47 容器全绿;②M1a/M2
-  既有测试不回归;③合成"真摘要块"样本覆盖跳 20 分支。判别信息进 `MixInfo`
-  (或等价访问器),不改变 parse 入参形状。
+- `mix.rs`(修复)— **勘误 2026-11-05(REA digest 追问裁定,第二版;原"实现期
+  对照 XCC 定稿"表述作废)**:gamemd MixFileClass 构造 0x5B3C20 反汇编定案——
+  摘要位(flags&0x00010000)只读一次存 +0x10、**从不回读**,data_start **无条件**
+  = 10+12·count(引擎不存在跳 20 路径);SHA-1 从不作用于 mix 数据;首 dword
+  低 16 位 ≠ 0 → 6 字节头旧格式(TS1 时代,语料零样本,`Err::Unsupported` 守卫);
+  位 0x00020000(加密索引流)维持 Unsupported。交付:`digest_flag() -> bool`
+  咨询位透传(文档注明引擎从不消费)。工程约束:①语料 **46** 容器全绿(遍历
+  口径 = 目录全部顶层 `*.mix` 深度 ≤4,见计划依据 §2 与歧义裁决 #4);②M1a/M2
+  既有测试不回归;③合成敌意样本覆盖置位不跳/旧格式拒绝两分支。不改变 parse
+  入参形状。
 - `shp_ts.rs`(原 tmp.rs 更名)— `ShpTsFile { zero, cx, cy, frames }`,
   帧头 24B:`x,y i16; cx,cy u16; flags u32@+8; rgba [u8;4]@+12;
   reserved u32@+16; data_offset u32@+20`(研究 §4:56=8+24·2 / 152=8+24·6
@@ -108,7 +115,8 @@ INI 层对畸形键宽容(缺 FileName/TilesInSet=空→0),段外行忽略(M2 ma
 2. **现存瓦片全量零 panic**:六剧场全部现存 TS TMP 文件解析 Err 仅限
    既知敌意面,panic=0;抽样字节闭合(clear01.sno len=1872、首槽 RAW 900B)。
 3. **敌意变异合成单测**:TS TMP 截断/谎报 cbx·cby/槽偏移越界;INI 坏段/坏整数/
-   blank 变体;mix 真摘要/幻影双分支合成样本。
+   blank 变体;mix 置位不跳 20/旧格式 6 字节头拒绝双分支合成样本(REA 定案后
+   口径,原"真摘要/幻影"双分支表述作废)。
 4. **代表甲骨文**:六容量、锚点([0]=Clear01、snow[963]=clifxl04.sno、
    nu[1174]=sfbrdg01.ubn、tem[837]=ariz01.tem、lun[197]=Crevas06.lun)、
    burnt01 帧 0 offset=56、lobrdb08 帧 1 offset=152、md 替换(snow base 798<964)。
