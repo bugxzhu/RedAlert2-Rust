@@ -805,6 +805,29 @@ git commit -m "refactor(core): tmp.rs 更名重定域为 shp_ts.rs(TS SHP 帧格
 
 ### Task 3: TS TMP 解析器(`format/theater_tmp.rs`)
 
+> **勘误 2026-11-05(控制器,ra2-decomp 匹配源码 + 语料字节双证裁决)——
+> 本块修正下文 52B 槽头字段宽度与位语义,以本块为准:**
+>
+> 证据:引擎**整体读入文件直接内存投射**(`Load_Tile_Data` @ 0x00547020,
+> `IsoTileSet{MapWidth@0,MapHeight@4,Width@8,Height@12,Tiles[]@16}` +
+> `ptr+offset` 修复指针),磁盘布局 ≡ `IsoTileRecord`(#pragma pack(4),
+> include/isotype.h)。故下文草图与 Interfaces 中的 i16 宽度全部改 i32:
+> `x, y: i32`、`extra_rect: [i32; 4]`;字段位次为 x/y@+0、extra_ofs@+8、
+> z_ofs@+0xC、extra_z_ofs@+0x10、extra_rect@+0x14、bitfield@+0x24、
+> height:u8@+0x28、terrain_type:i8@+0x29、ramp_type:i8@+0x2A、
+> radar_left@+0x2B、radar_right@+0x2E、pad:[u8;3]@+0x31(0x34=52 精确覆盖,
+> **原 `tail: [u8; 12]` 字段删除**——歧义裁决 #3 的"未文档化尾域"随宽度
+> 修正消解,pad 改 3B)。bit2 语义改 **IsRandomized**(非"damaged";语料
+> MM 瓦片 0xCE/0xCF 实测置位),bit0=IsHasExtraData、bit1=IsHasZData 不变。
+> **两级偏移语义(勿混)**:槽表项 = 文件基相对(下文原句"槽偏移相对文件头、
+> 0=空槽"正确,保留);extra_ofs/z_ofs 字段 = **槽(record)相对**(引擎
+> isotype.cpp:1282 `record + ExtraOffset`;z_ofs 语料恒 = 52+cx·cy/2,与
+> 歧义裁决 #7 的连续布局读取一致,z_ofs 原样暴露不校验不变)。子瓦片索引
+> x + cbx·y 行主序(引擎 SubTile_Index)。语料闭合锚:clear01.sno 1872 全
+> 布局 + 10 个多槽文件 `len == 末槽+52+900+900(+extra)` 精确闭合(研究 §5
+> 勘误后版本)。合成测试样本按 i32 宽度构造;对真实文件的断言以研究 §5 新表
+> 为准。计数不变(合成 210 = 197+13)。
+
 **Files:**
 - Create: `crates/core/src/format/theater_tmp.rs`
 - Modify: `crates/core/src/format/mod.rs`(追加 `pub mod theater_tmp;`,本任务先置于 `pub mod shp_ts;` 之后;Task 4 建 `theater` 后可按字母序整理,行为无关)

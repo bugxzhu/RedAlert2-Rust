@@ -175,25 +175,45 @@ lobrdb08.sno 帧 1 偏移 152 = 8+24·6 精确;+0x0C..0x10 RGBA(unknown_d 值 = 
 **SHP 精灵群**(ua∈{0..4} 标志、ud 蓝通道、radar 域 00FB12 路桥标记),其 RAW
 存储回退结论对 SHP 帧数据仍成立(RLEZeroTS 或裸 cx×cy 二选一,判别式不变)。
 
-## 5. TS TMP 52B 图像头字段(考据组自 XCC GPL 提取;语义重写引用需注明出处)
+## 5. TS TMP 52B 图像头字段(勘误 2026-11-05:宽度经引擎匹配源码+语料字节双证改定)
+
+**初版自 XCC 考据的 i16 宽度有误**。裁定证据:ra2-decomp `include/isotype.h`
+`IsoTileRecord`(in-memory 结构,`#pragma pack(4)`)× `Load_Tile_Data`
+(src/isotype.cpp @ 0x00547020)——引擎**整体读入文件后直接内存投射**(无独立磁盘
+解析),故磁盘布局 ≡ 内存布局,X/Y 与 extra 矩形必为 i32;clear01.sno 全 52B
+字节在引擎布局下逐字段自洽(RampType=0、Height=0、TileType=13、z 闭合、
+3B 0xCD 尾垫),在 i16 布局下同位置全是 0xCD 垃圾。定案布局:
 
 ```
-+0x00  x, y              i16    槽内绘制原点
-+0x04  extra_ofs         i32    extra 数据相对槽偏移(0xCD…= 无)
-+0x08  z_ofs             i32    z 数据相对偏移
-+0x0C  extra_z_ofs       i32
-+0x10  extra_x/y/cx/cy   4×i16  extra 页矩形
-+0x18  bitfield          u32    bit0=有 extra, bit1=有 z, bit2=damaged;高字节 0xCD 填充
-+0x1C  height            i8     高度基准
-+0x1D  terrain_type      i8     9=水 10/14=岸 13=草 15=崖 6/11/15=隧道(值表源自考据,
-                               未逐值复核——实现单测以抽样文件钉死)
-+0x1E  ramp_type         i8     1..=15 坡向, 0=平
-+0x1F  radar_color_left  3B     左半小地图色(调色板索引或 RGB,M3 渲染时定)
-+0x22  radar_color_right 3B
-+0x25  pad[3]
++0x00  x, y              i32×2  槽内绘制原点(int X/Y)
++0x08  extra_ofs         i32    extra 数据**槽相对**偏移(引擎 isotype.cpp:1282
+                               `record + ExtraOffset`;bit0=0 时可为陈旧值,门控以 bit0 为准)
++0x0C  z_ofs             i32    z 数据**槽相对**偏移;语料恒 = 52+cx·cy/2(连续布局)
++0x10  extra_z_ofs       i32    (无 extra-z 时 0xCD 填充)
++0x14  extra_x/y/w/h     4×i32  extra 页矩形(ExtraX/Y/Width/Height)
++0x24  bitfield          u32    bit0=IsHasExtraData, bit1=IsHasZData,
+                               bit2=IsRandomized(非"damaged";MM 瓦片实测 0xCE/0xCF
+                               置位);bit3+ 原样透传;高 3 字节恒 0xCD(写出器未初始化,
+                               引擎只消费低 3 位)
++0x28  height            u8     高度基准(clear01=0)
++0x29  terrain_type      i8     引擎名 TileType(clear01=13;9=水 10/14=岸 13=草
+                               15=崖 6/11/15=隧道——值表源自考据,未逐值复核,
+                               实现单测以抽样文件钉死)
++0x2A  ramp_type         i8     引擎名 RampType(1..=15 坡向, 0=平)
++0x2B  radar_left        3B     LowColor(左半小地图色)
++0x2E  radar_right       3B     HighColor
++0x31  pad               3B     pack(4) 对齐垫(0xCD)
 ```
-0xCC/0xCD 填充域(全语料 84 条 CC 噪声 + clear01 全 CD 头)按"观测域校验+宽容跳过"
-处理(零 panic 姿势,M2 先例);字段偏移以解析器单测对真实文件钉死为准。
+(0x31+3 = 0x34 = 52 精确覆盖,无未文档化尾域。)
+
+**两级偏移语义(易错点)**:槽表项(文件 +16 区)是**文件基相对**(引擎
+`ptr + offset` 修复指针;多槽语料首槽值恒 = 16+4n 判别性证实);而 extra_ofs/
+z_ofs 是**槽(record)相对**。z 连续布局语料真:clear01 与 10 个多槽文件全部
+`len == 末槽 + 52 + RAW(cx·cy/2) + z(cx·cy/2) [+ extra]` 精确闭合(槽距 1852
+= 52+900+900)。RAW 恒在 slot+52(60×30 时 900B);z 在 slot+52+cx·cy/2。
+子瓦片索引 = x + cbx·y 行主序(引擎 `SubTile_Index`)。
+0xCC/0xCD 填充域按"观测域校验+宽容跳过"处理(零 panic 姿势,M2 先例);
+字段偏移以解析器单测对真实文件钉死为准。
 
 ## 6. RLEZeroTS 复验(对象改为 SHP 帧数据后仍成立)
 

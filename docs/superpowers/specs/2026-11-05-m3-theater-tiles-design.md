@@ -65,10 +65,13 @@ M1b 误判(实为 TS SHP)、T9 容量测试失真。
 - `theater_tmp.rs`(新)— `TsTmpFile::parse`:
   头 16B i32 `{cbx, cby, cx, cy}`(guard:cbx·cby ≤ 65536、cx·cy/2 ≤ 2 MiB、
   4·cbx·cby + 52 ≤ len,敌意谎报一律 Err);槽表 cbx·cby 个 i32 相对偏移
-  (0=空槽);每槽 52B 头(字段名照研究 §5:x/y/extra_ofs/z_ofs/extra_z_ofs/
-  extra 矩形/bitfield/height/terrain_type/ramp_type/radar 左右色/pad;0xCD/0xCC
-  填充域原样暴露不校验);访问器 `slot(i) -> Option<TsTmpSlot>`、
-  `diamond_pixels() -> &[u8]`(恒 cx·cy/2 RAW)、`z_data() -> Option<&[u8]>`。
+  (**文件基相对**;0=空槽);每槽 52B 头(字段名照研究 §5 **勘误后版本**:
+  x/y 与 extra 矩形为 **i32**(引擎内存投射 + 语料字节双证,原 i16 考据作废)、
+  extra_ofs/z_ofs 为**槽相对**、bitfield bit0=extra/bit1=z/bit2=**randomized**、
+  height u8/terrain_type i8/ramp_type i8/radar 左右色/pad 3B——0x34=52 全覆盖
+  无尾域;0xCD/0xCC 填充域原样暴露不校验);访问器 `slot(i) -> Option<TsTmpSlot>`、
+  `diamond_pixels() -> &[u8]`(恒 cx·cy/2 RAW)、`z_data() -> Option<&[u8]>`;
+  子瓦片索引 x + cbx·y 行主序。
 - `theater.rs`(新)— 三层:
   1. `TheaterIni::parse(text)`:段序保留、键大小写不敏感、TilesInSet **atoi 前缀
      语义**(出厂脏数据 'o'→0;研究 §3)、blank/0 不贡献、set006 型保留槽占位;
