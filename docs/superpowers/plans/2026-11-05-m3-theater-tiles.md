@@ -1393,18 +1393,18 @@ impl TheaterIni {
         }
     }
 
-    /// 全局槽位 → 所属集合(owned;界外 None)。
+    /// 全局槽位 → 所属集合(owned;界外 None,含落入零 tiles 集阴影区的索引)。
     pub fn set_of(&self, index: usize) -> Option<TheaterSetInfo> {
-        self.sets
-            .iter()
-            .rev()
-            .find(|s| s.first_index <= index)
-            .map(|s| TheaterSetInfo {
-                number: s.number,
-                name: s.name.clone(),
-                first_index: s.first_index,
-                tiles: s.tiles,
-            })
+        let set = self.sets.iter().rev().find(|s| s.first_index <= index)?;
+        if index - set.first_index >= set.tiles {
+            return None;
+        }
+        Some(TheaterSetInfo {
+            number: set.number,
+            name: set.name.clone(),
+            first_index: set.first_index,
+            tiles: set.tiles,
+        })
     }
 }
 ```
@@ -1444,7 +1444,7 @@ mod tests {
              [TileSet0002]\nFileName=c\nTilesInSet=150\n\
              [TileSet0003]\nFileName=d\nTilesInSet=-3\n",
         );
-        assert_eq!(t.slot_count(), 12); // 0 + 12 + 99 + 0
+        assert_eq!(t.slot_count(), 111); // 0 + 12 + 99(150 截)+ 0
         assert_eq!(t.set_of(0).unwrap().number, 1);
     }
 
