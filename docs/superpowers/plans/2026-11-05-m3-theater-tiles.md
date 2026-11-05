@@ -30,7 +30,7 @@
 - 零 panic:所有解析器切片/索引用 ByteReader 或显式边界检查;宽算术显式宽类型/checked(debug 溢出检查下也不 panic)。敌意输入(截断/谎报/越界)一律 Err,分配前先用输入长度推导上界。
 - 错误三变体语义不变:`UnexpectedEof` = 截断;`Unsupported` = 合法但本版本不支持(含 LastTilesInSet 引擎规则死路);`Invalid` = 畸形。
 - 零 IO 于解析器:所有 parse 接受字节切片;IO 收口在 `TheaterAssets::open`(库边界的装载器,spec §4 明文)与测试/CLI。核心解析器无 HashMap/HashSet(装载器索引用排序 Vec + 二分;测试代码可用 BTreeMap)。
-- 计数基线(2026-11-05 实测):`cargo test --workspace` = **192 合成**(core 178 + ra2-map 主程序单测 3 + ra2-map cli 5 + ra2-mix cli 6);`-- --ignored` = **27**(format_samples 13 + m1b 1 + m2 1 + map_samples 4 + mix_integration 7 + ra2-map cli 1)。每任务给出"新增 N 个"并全绿;M2 教训:不链式维护逐任务累计值,终账见 Task 8(合成 **224** / ignored **35**;Task 1 勘误后 228→224)。
+- 计数基线(2026-11-05 实测):`cargo test --workspace` = **192 合成**(core 178 + ra2-map 主程序单测 3 + ra2-map cli 5 + ra2-mix cli 6);`-- --ignored` = **27**(format_samples 13 + m1b 1 + m2 1 + map_samples 4 + mix_integration 7 + ra2-map cli 1)。每任务给出"新增 N 个"并全绿;M2 教训:不链式维护逐任务累计值,终账见 Task 8(合成 **226** / ignored **35**;Task 1 勘误后 228→226;原计划 T5 行有 218+6=224 笔误,勘误时一并校正)。
 - 每任务收尾:`export PATH="$HOME/.cargo/bin:$PATH" && cargo fmt --all && cargo clippy --all-targets -- -D warnings && cargo test --workspace` 全绿后 commit;涉真资产的任务另跑 ignored 全绿。clippy 新 deny lint 用迭代器/`as_chunks` 风格预避免,不得 `#[allow]`。
 - commit 用 conventional commits,每条末尾附 `Co-Authored-By: Claude Code <noreply@anthropic.com>`(第二个 `-m` 传入)。
 - **REA 并行抽查(非本计划任务)**:gamemd.exe 抽查与实现并行进行;其第一批结论已作为"REA 勘误(2026-11-05)"并入本计划(Task 4 顺序探查/LastTilesInSet、Task 5 挂载序、剧场常数表出处 0x7E1B78)。后续 REA 发现与本计划冲突时,由控制器发勘误,实现者不自行改判定。
@@ -99,7 +99,7 @@
 > (27 置位/19 未置位),`panic!("语料不应出现真摘要容器")` 一句删除,
 > clear01.sno 1872 内容锚不变。Step 4 TDD 红流程不变。Step 6 计数改:
 > 合成 **194**(192 − 删旧 1 + 新 3);ignored 28 不变。计划级终账
-> 228→**224**/35。XCC 出处注释改写:mix.rs 文档注明"摘要位为工具侧咨询位,
+> 228→**226**/35。XCC 出处注释改写:mix.rs 文档注明"摘要位为工具侧咨询位,
 > 引擎行为经 REA 0x5B3C20 反汇编裁决(gamemd YR 1.001),XCC 的 checksum
 > 概念不进入本项目判定路径"。
 >
@@ -790,7 +790,7 @@ Expected: 编译通过(ignored 13 与 1 个测试仍被过滤;数量不变)
 - [ ] **Step 3: 全套回归后 Commit**
 
 Run: `cargo fmt --all && cargo clippy --all-targets -- -D warnings && cargo test --workspace`
-Expected: 全绿;合成 **199**(196 + shp_ts 新 3;迁移不改计数)
+Expected: 全绿;合成 **197**(194 + shp_ts 新 3;迁移不改计数)
 
 Run: `RA2_ASSETS_DIR="E:\hongjing\Reunion 2023" cargo test --workspace -- --ignored`
 Expected: 全绿;ignored 28(burnt01/lobrdb08 甲骨文迁移后依旧通过 = 重标正确性的实证)
@@ -1200,7 +1200,7 @@ Expected: 13 passed
 - [ ] **Step 2: 全套回归后 Commit**
 
 Run: `cargo fmt --all && cargo clippy --all-targets -- -D warnings && cargo test --workspace`
-Expected: 全绿;合成 **212**(199 + 13)
+Expected: 全绿;合成 **210**(197 + 13)
 
 ```bash
 git add crates/core/src/format/theater_tmp.rs crates/core/src/format/mod.rs
@@ -1521,7 +1521,7 @@ Expected: 10 passed
 - [ ] **Step 3: 全套回归后 Commit**
 
 Run: `cargo fmt --all && cargo clippy --all-targets -- -D warnings && cargo test --workspace`
-Expected: 全绿;合成 **222**(212 + 10)
+Expected: 全绿;合成 **220**(210 + 10)
 
 ```bash
 git add crates/core/src/format/theater.rs crates/core/src/format/mod.rs
@@ -2047,7 +2047,7 @@ Expected: 3 passed(Task 4 的 1 + 新 2)
 - [ ] **Step 4: 全套回归后 Commit**
 
 Run: `cargo fmt --all && cargo clippy --all-targets -- -D warnings && cargo test --workspace`
-Expected: 全绿;合成 **224**(218 + 6)
+Expected: 全绿;合成 **226**(220 + 6)
 
 Run: `RA2_ASSETS_DIR="E:\hongjing\Reunion 2023" cargo test --workspace -- --ignored`
 Expected: 全绿;ignored **31**(29 + 2)
@@ -2125,7 +2125,7 @@ Expected: 4 passed(计数不变;改名重钉)
 - [ ] **Step 2: 全套回归后 Commit**
 
 Run: `cargo fmt --all && cargo clippy --all-targets -- -D warnings && cargo test --workspace`
-Expected: 全绿;合成 **224**(不变)
+Expected: 全绿;合成 **226**(不变)
 
 ```bash
 git add crates/core/tests/map_samples.rs
@@ -2532,7 +2532,7 @@ Expected: 1 passed(重写的活体测试)
 - [ ] **Step 4: 全套回归后 Commit**
 
 Run: `cargo fmt --all && cargo clippy --all-targets -- -D warnings && cargo test --workspace`
-Expected: 全绿;合成 **224**(不变)
+Expected: 全绿;合成 **226**(不变)
 
 ```bash
 git add tools/ra2-map/src/main.rs tools/ra2-map/tests/cli.rs
@@ -2911,7 +2911,7 @@ Expected: 3 passed(闭合 + 缺槽账 + 零 panic)再 `--test m3_acceptance m3_o
 - [ ] **Step 6: 终账(计划级完成定义核对)**
 
 Run: `export PATH="$HOME/.cargo/bin:$PATH" && cargo fmt --all --check && cargo clippy --all-targets -- -D warnings && cargo test --workspace`
-Expected: 全绿;**合成 224 passed**
+Expected: 全绿;**合成 226 passed**
 
 Run: `RA2_ASSETS_DIR="E:\hongjing\Reunion 2023" cargo test --workspace -- --ignored`
 Expected: 全绿;**ignored 35 passed**(既有 27 + mix_integration 1 + theater_samples 3 + m3_acceptance 4;map_samples 4 与 ra2-map cli 1 为改写,计数不变)
@@ -2928,7 +2928,7 @@ git commit -m "test(core): M3 里程碑验收(807 图闭合 + 缺文件槽精确
 
 ## 完成定义(计划级验收)
 
-1. `cargo test --workspace` 全绿:**224 个合成测试**(基线 192 + Task 1 的 2 + Task 2 的 3 + Task 3 的 13 + Task 4 的 10 + Task 5 的 6;Task 6/7/8 只改写不新增;Task 1 勘误后由 4 改 2)。
+1. `cargo test --workspace` 全绿:**226 个合成测试**(基线 192 + Task 1 的 2 + Task 2 的 3 + Task 3 的 13 + Task 4 的 10 + Task 5 的 6;Task 6/7/8 只改写不新增;Task 1 勘误后由 4 改 2)。
    `RA2_ASSETS_DIR="E:\hongjing\Reunion 2023" cargo test --workspace -- --ignored` 全绿:**35 个真实资产测试**(基线 27 + Task 1 语料 1 + Task 4 真测 1 + Task 5 真测 2 + Task 8 验收 4;Task 2/6/7 为改写,计数不变)。
 2. `cargo fmt --all --check` 与 `cargo clippy --all-targets -- -D warnings` 零告警;debug 溢出检查下零 panic。
 3. spec §6 六项验收映射:1→Task 8 闭合测试(白名单界 + 类 A/B/C/E 零);2→Task 8 零 panic 扫描 + clear01 字节闭合;3→Task 1/3/4 敌意合成集(mix 双分支、TS TMP 守卫、INI 坏键);4→Task 8 甲骨文(Task 2 帧偏移、Task 4/8 六容量四锚点、Task 6 的 963=容量−1、md 替换 798<964);5→fmt/clippy/GPL/零依赖/资产零入库;6→Task 7 三剧场活体 PNG + DESERT 负向(歧义裁决 #1)。
@@ -2958,7 +2958,7 @@ git commit -m "test(core): M3 里程碑验收(807 图闭合 + 缺文件槽精确
 - `theater_spec(Theater) -> TheaterSpec`:Task 4 定义,Task 7/8 一致 ✓
 - `TheaterAssets::open/lookup/lookup_id/origin`:Task 5 定义,Task 6 不用(显式链)、Task 7/8 一致 ✓
 - `SlotFile::{File, Reserved}`:Task 4 定义,Task 6/7/8 一致 ✓
-- 计数核对:合成 224 = 192 + 2 + 3 + 13 + 10 + 6(Task 1 勘误后;原 228 系 SHA-1 方案);ignored 35 = 27 + 1 + 1 + 2 + 4——与各任务 Run 步骤期望值逐一相符 ✓
+- 计数核对:合成 226 = 192 + 2 + 3 + 13 + 10 + 6(Task 1 勘误后;原 228 系 SHA-1 方案;原 T5 行 218+6=224 为计划笔误,真值 222+6=228);ignored 35 = 27 + 1 + 1 + 2 + 4——与各任务 Run 步骤期望值逐一相符 ✓
 
 **已知风险与执行提示**:
 
