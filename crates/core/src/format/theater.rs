@@ -8,9 +8,12 @@
 //! 0x5B4430 / Theater::Array VA 0x7E1B78):挂载序首中即胜、顺序探查、
 //! LastTilesInSet 引擎规则、.ubn 扩展名与六份 md INI 名互证。
 
+use crate::format::crc::mix_name_id;
 use crate::format::ini::{parse_int_prefix, IniDocument};
 use crate::format::map::meta::Theater;
+use crate::format::mix::{MixArchive, MixEntry};
 use crate::format::FormatError;
+use std::collections::BTreeMap;
 
 /// 剧场常数表项(研究 §3/§8;容量为 md INI 的 TilesInSet 运行时累加和)。
 pub struct TheaterSpec {
@@ -172,6 +175,281 @@ impl TheaterIni {
     }
 }
 
+// ============ 装载器层(TheaterAssets;引擎挂载序,首中即胜)============
+
+/// 嵌套下钻体量上限(spec"体量上限防炸";语料最大嵌套容器约 35.7 MB)。
+pub const MAX_DESCEND_BYTES: usize = 256 * 1024 * 1024;
+
+/// 嵌套深度上限(spec §4"深度 ≤3";顶层挂载为深度 0)。
+const MAX_DEPTH: usize = 3;
+
+/// 每剧场 mix 名单(研究表 1 语料观测;挂载序在 ecache/elocal 之后,
+/// 列表内顺序仅为确定性)。localmd.mix/local.mix 的拦截名另有专位。
+const THEATER_MIX_NAMES: [&str; 19] = [
+    "isogen.mix",
+    "isotemp.mix",
+    "isosnow.mix",
+    "isourb.mix",
+    "temperat.mix",
+    "urban.mix",
+    "snow.mix",
+    "isodes.mix",
+    "isolun.mix",
+    "isoubn.mix",
+    "urbannmd.mix",
+    "isogenmd.mix",
+    "isotemmd.mix",
+    "isourbmd.mix",
+    "isosnomd.mix",
+    "isodesmd.mix",
+    "isolunmd.mix",
+    "isoubnmd.mix",
+    "snowmd.mix",
+];
+
+/// 一个已挂载容器(数据 + 解析后的索引表)。
+struct Mounted {
+    label: String,
+    data: Vec<u8>,
+    data_start: usize,
+    entries: Vec<MixEntry>,
+    pos: usize,
+    depth: usize,
+    seq: usize,
+}
+
+/// id → 数据索引项(start/len 为容器 data 内绝对区间)。
+struct IndexEntry {
+    id: u32,
+    container: usize,
+    start: usize,
+    len: usize,
+}
+
+/// 剧场资产全集(引擎挂载序装载;查询首中即胜)。
+pub struct TheaterAssets {
+    containers: Vec<Mounted>,
+    index: Vec<IndexEntry>,
+}
+
+/// 便宜前置判定(避免对每个数据条目做全量 MIX 解析;真正校验仍由
+/// MixArchive::parse 完成)。
+fn mix_preflight(blob: &[u8]) -> bool {
+    if blob.len() < 10 {
+        return false;
+    }
+    let flags = u32::from_le_bytes([blob[0], blob[1], blob[2], blob[3]]);
+    let count = u16::from_le_bytes([blob[4], blob[5]]);
+    if flags & 0x0002_0000 != 0 || flags & !0x0003_0000 != 0 {
+        return false;
+    }
+    10 + 12 * count as usize <= blob.len()
+}
+
+/// 先序下钻:容器自身先入册,再递归嵌套(拦截名单命中者截流到
+/// holdback_hits,由 open 在其专位挂载)。装载器非解析热路径,克隆为清晰让路。
+#[allow(clippy::too_many_arguments)] // 冷路径/草图既定形(8 参,默认阈值 7;偏差记录已录)
+fn walk(
+    data: Vec<u8>,
+    label: String,
+    pos: usize,
+    depth: usize,
+    seq: &mut usize,
+    out: &mut Vec<Mounted>,
+    holdback_hits: &mut BTreeMap<&'static str, Vec<u8>>,
+    holdback_ids: &BTreeMap<u32, &'static str>,
+) {
+    let mix = match MixArchive::parse(data.clone()) {
+        Ok(m) => m,
+        Err(_) => return,
+    };
+    let data_start = mix.data_start();
+    let entries: Vec<MixEntry> = mix.entries().to_vec();
+    let s = *seq;
+    *seq += 1;
+    let owned = data.clone(); // 偏差记录:直白写法,替代 out.last() 二次克隆
+    out.push(Mounted {
+        label: label.clone(), // 偏差记录:子标签仍需原 label(差 2 裁定;格式 name#HEXID8)
+        data,
+        data_start,
+        entries: entries.clone(),
+        pos,
+        depth,
+        seq: s,
+    });
+    if depth >= MAX_DEPTH {
+        return;
+    }
+    for e in &entries {
+        let start = data_start + e.offset as usize;
+        let end = start + e.size as usize;
+        if end > owned.len() {
+            continue;
+        }
+        let blob = &owned[start..end];
+        if blob.len() > MAX_DESCEND_BYTES || !mix_preflight(blob) {
+            continue;
+        }
+        if let Some(&name) = holdback_ids.get(&e.id) {
+            holdback_hits.entry(name).or_insert_with(|| blob.to_vec());
+            continue;
+        }
+        walk(
+            blob.to_vec(),
+            format!("{label}#{:08X}", e.id),
+            pos,
+            depth + 1,
+            seq,
+            out,
+            holdback_hits,
+            holdback_ids,
+        );
+    }
+}
+
+impl TheaterAssets {
+    /// 按引擎挂载序装载(spec §4 + REA 勘误;见模块注释)。
+    pub fn open(assets_dir: &std::path::Path) -> Result<Self, FormatError> {
+        let mut roots: Vec<(usize, String, Vec<u8>)> = Vec::new();
+        // expandmd99..expandmd00(pos = 99−nn,高位先)
+        for nn in (0..=99u32).rev() {
+            let name = format!("expandmd{nn:02}.mix");
+            if let Ok(data) = std::fs::read(assets_dir.join(&name)) {
+                roots.push((99 - nn as usize, name, data));
+            }
+        }
+        // ra2md / ra2(必需)
+        for (pos, name) in [(100usize, "ra2md.mix"), (101, "ra2.mix")] {
+            let data = std::fs::read(assets_dir.join(name))
+                .map_err(|e| FormatError::Invalid(format!("必需资产 {name} 读取失败: {e}")))?;
+            roots.push((pos, name.to_string(), data));
+        }
+        // cachemd / cache(可选,缺席即跳)
+        for (pos, name) in [(102usize, "cachemd.mix"), (103, "cache.mix")] {
+            if let Ok(data) = std::fs::read(assets_dir.join(name)) {
+                roots.push((pos, name.to_string(), data));
+            }
+        }
+        // 根目录 ecache*/elocal*(文件名升序)
+        let mut ecaches: Vec<String> = std::fs::read_dir(assets_dir)
+            .map_err(|e| FormatError::Invalid(format!("资产目录不可读: {e}")))?
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.ends_with(".mix") && (n.starts_with("ecache") || n.starts_with("elocal")))
+            .collect();
+        ecaches.sort();
+        for (i, name) in ecaches.iter().enumerate() {
+            if let Ok(data) = std::fs::read(assets_dir.join(name)) {
+                roots.push((106 + i, name.clone(), data));
+            }
+        }
+        // 拦截名单(localmd/local/每剧场):id → 名
+        let mut holdback_ids: BTreeMap<u32, &'static str> = BTreeMap::new();
+        holdback_ids.insert(mix_name_id("localmd.mix"), "localmd.mix");
+        holdback_ids.insert(mix_name_id("local.mix"), "local.mix");
+        for name in THEATER_MIX_NAMES {
+            holdback_ids.insert(mix_name_id(name), name);
+        }
+        // 先序下钻全部挂载根
+        let mut out: Vec<Mounted> = Vec::new();
+        let mut holdback_hits: BTreeMap<&'static str, Vec<u8>> = BTreeMap::new();
+        let mut seq = 0usize;
+        for (pos, name, data) in roots {
+            walk(
+                data,
+                name,
+                pos,
+                0,
+                &mut seq,
+                &mut out,
+                &mut holdback_hits,
+                &holdback_ids,
+            );
+        }
+        // 拦截名按自身挂载位回挂(localmd 104 / local 105 / 每剧场 1000+)
+        for (pos, name) in [(104usize, "localmd.mix"), (105, "local.mix")] {
+            if let Some(data) = holdback_hits.remove(name) {
+                walk(
+                    data,
+                    name.to_string(),
+                    pos,
+                    0,
+                    &mut seq,
+                    &mut out,
+                    &mut holdback_hits,
+                    &holdback_ids,
+                );
+            }
+        }
+        for (i, name) in THEATER_MIX_NAMES.iter().enumerate() {
+            if let Some(data) = holdback_hits.remove(name) {
+                walk(
+                    data,
+                    name.to_string(),
+                    1000 + i,
+                    0,
+                    &mut seq,
+                    &mut out,
+                    &mut holdback_hits,
+                    &holdback_ids,
+                );
+            }
+        }
+        // (pos, depth, seq) 排序 → 顺序收集 → 按 id 稳定排序 → 每组取首个
+        out.sort_by_key(|r| (r.pos, r.depth, r.seq));
+        let mut candidates: Vec<(u32, usize, usize, usize)> = Vec::new();
+        for (ci, rec) in out.iter().enumerate() {
+            for e in &rec.entries {
+                candidates.push((
+                    e.id,
+                    ci,
+                    rec.data_start + e.offset as usize,
+                    e.size as usize,
+                ));
+            }
+        }
+        candidates.sort_by_key(|c| c.0); // 稳定:同 id 保装载序首个 = 首中即胜
+        let mut index: Vec<IndexEntry> = Vec::new();
+        for (id, container, start, len) in candidates {
+            if index.last().map(|last| last.id) == Some(id) {
+                continue;
+            }
+            index.push(IndexEntry {
+                id,
+                container,
+                start,
+                len,
+            });
+        }
+        Ok(TheaterAssets {
+            containers: out,
+            index,
+        })
+    }
+
+    fn slot_of(&self, id: u32) -> Option<(usize, &IndexEntry)> {
+        let i = self.index.binary_search_by_key(&id, |e| e.id).ok()?;
+        Some((self.index[i].container, &self.index[i]))
+    }
+
+    /// 按名查找(文件名大小写/斜杠规则同 mix_name_id)。
+    pub fn lookup(&self, name: &str) -> Option<&[u8]> {
+        self.lookup_id(mix_name_id(name))
+    }
+
+    /// 按 id 直查(匿名嵌套库等)。
+    pub fn lookup_id(&self, id: u32) -> Option<&[u8]> {
+        let (c, e) = self.slot_of(id)?;
+        Some(&self.containers[c].data[e.start..e.start + e.len])
+    }
+
+    /// 诊断:命中容器标签(如 ra2.mix / ra2.mix#0F5D1D99)。
+    pub fn origin(&self, name: &str) -> Option<&str> {
+        let (c, _) = self.slot_of(mix_name_id(name))?;
+        Some(self.containers[c].label.as_str())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -307,5 +585,136 @@ mod tests {
             assert_eq!(s.ext, ext);
             assert_eq!(s.capacity, cap);
         }
+    }
+
+    // —— 装载器单测辅助(临时目录;tag 隔离并行测试)——
+    fn temp_assets(tag: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("ra2-theater-{tag}"));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// 构造 flags=0 的最小合法 MIX(按名条目)。
+    fn make_mix(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut v = Vec::new();
+        v.extend_from_slice(&0u32.to_le_bytes());
+        v.extend_from_slice(&(entries.len() as u16).to_le_bytes());
+        let body_len: usize = entries.iter().map(|(_, c)| c.len()).sum();
+        v.extend_from_slice(&(body_len as u32).to_le_bytes());
+        let mut off = 0u32;
+        for (name, c) in entries {
+            v.extend_from_slice(&mix_name_id(name).to_le_bytes());
+            v.extend_from_slice(&off.to_le_bytes());
+            v.extend_from_slice(&(c.len() as u32).to_le_bytes());
+            off += c.len() as u32;
+        }
+        for (_, c) in entries {
+            v.extend_from_slice(c);
+        }
+        v
+    }
+
+    /// 同 make_mix,但 id 由调用方给定(匿名嵌套 mix 用)。
+    fn make_mix_raw(entries: &[(u32, &[u8])]) -> Vec<u8> {
+        let mut v = Vec::new();
+        v.extend_from_slice(&0u32.to_le_bytes());
+        v.extend_from_slice(&(entries.len() as u16).to_le_bytes());
+        let body_len: usize = entries.iter().map(|(_, c)| c.len()).sum();
+        v.extend_from_slice(&(body_len as u32).to_le_bytes());
+        let mut off = 0u32;
+        for (id, c) in entries {
+            v.extend_from_slice(&id.to_le_bytes());
+            v.extend_from_slice(&off.to_le_bytes());
+            v.extend_from_slice(&(c.len() as u32).to_le_bytes());
+            off += c.len() as u32;
+        }
+        for (_, c) in entries {
+            v.extend_from_slice(c);
+        }
+        v
+    }
+
+    fn put(dir: &std::path::Path, name: &str, bytes: &[u8]) {
+        std::fs::write(dir.join(name), bytes).unwrap();
+    }
+
+    #[test]
+    fn first_match_wins_expand_over_ra2md_over_ra2() {
+        // REA 勘误:首中即胜,挂载序 expandmd* > ra2md > ra2
+        let d = temp_assets("first-match");
+        put(&d, "ra2.mix", &make_mix(&[("probe.dat", b"from-ra2")]));
+        put(&d, "ra2md.mix", &make_mix(&[("probe.dat", b"from-ra2md")]));
+        put(
+            &d,
+            "expandmd01.mix",
+            &make_mix(&[("probe.dat", b"from-expand")]),
+        );
+        let a = TheaterAssets::open(&d).unwrap();
+        assert_eq!(a.lookup("probe.dat").unwrap(), b"from-expand");
+        assert_eq!(a.origin("probe.dat"), Some("expandmd01.mix"));
+    }
+
+    #[test]
+    fn cachemd_beats_localmd() {
+        // cachemd(pos 102)> localmd(pos 104,自 ra2md 条目拦截回挂)
+        let d = temp_assets("cachemd");
+        let localmd_blob = make_mix(&[("probe.dat", b"from-localmd")]);
+        put(&d, "ra2.mix", &make_mix(&[]));
+        put(
+            &d,
+            "ra2md.mix",
+            &make_mix(&[("localmd.mix", &localmd_blob)]),
+        );
+        put(
+            &d,
+            "cachemd.mix",
+            &make_mix(&[("probe.dat", b"from-cachemd")]),
+        );
+        let a = TheaterAssets::open(&d).unwrap();
+        assert_eq!(a.lookup("probe.dat").unwrap(), b"from-cachemd");
+    }
+
+    #[test]
+    fn anonymous_nested_mix_descends() {
+        // expandmd01 匿名嵌套 #C31B4D61 的必需路径缩小版
+        let d = temp_assets("anon-nested");
+        let inner = make_mix(&[("deep.dat", b"nested")]);
+        put(&d, "ra2.mix", &make_mix_raw(&[(0xC31B_4D61, &inner)]));
+        put(&d, "ra2md.mix", &make_mix(&[]));
+        let a = TheaterAssets::open(&d).unwrap();
+        assert_eq!(a.lookup("deep.dat").unwrap(), b"nested");
+        assert!(a.origin("deep.dat").unwrap().contains("C31B4D61"));
+    }
+
+    #[test]
+    fn depth_guard_stops_at_three() {
+        // ra2(0) → m1(1) → m2(2) → m3(3) → m4(4 超限不下钻):d3 可查,d4 不可查
+        let d = temp_assets("depth");
+        let m4 = make_mix(&[("d4.dat", b"x4")]);
+        let m3 = make_mix_raw(&[(0x1111_1111, &m4), (mix_name_id("d3.dat"), b"x3")]);
+        let m2 = make_mix_raw(&[(0x2222_2222, &m3)]);
+        let m1 = make_mix_raw(&[(0x3333_3333, &m2)]);
+        put(&d, "ra2.mix", &make_mix_raw(&[(0x4444_4444, &m1)]));
+        put(&d, "ra2md.mix", &make_mix(&[]));
+        let a = TheaterAssets::open(&d).unwrap();
+        assert_eq!(a.lookup("d3.dat").unwrap(), b"x3");
+        assert!(a.lookup("d4.dat").is_none());
+    }
+
+    #[test]
+    fn missing_required_root_is_err() {
+        let d = temp_assets("missing-root");
+        put(&d, "ra2.mix", &make_mix(&[])); // 缺 ra2md.mix → Invalid
+        assert!(matches!(
+            TheaterAssets::open(&d),
+            Err(FormatError::Invalid(_))
+        ));
+    }
+
+    #[test]
+    fn max_descend_bytes_const_pinned() {
+        // 语料最大嵌套容器约 35.7 MB;256 MiB 为防炸护栏(依据 §1)
+        assert_eq!(MAX_DESCEND_BYTES, 268_435_456);
     }
 }

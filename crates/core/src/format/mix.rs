@@ -7,6 +7,7 @@ use super::crc::mix_name_id;
 use super::FormatError;
 
 /// MIX 索引项:ID、相对 body 的偏移、大小。
+#[derive(Clone)]
 pub struct MixEntry {
     pub id: u32,
     pub offset: u32,
