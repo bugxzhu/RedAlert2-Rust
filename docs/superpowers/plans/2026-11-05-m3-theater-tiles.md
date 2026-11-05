@@ -2169,7 +2169,7 @@ git commit -m "test(core): T9 重钉——snow 容量测试改 INI 枚举语义(
 
 - 语义要点(spec §4/§7 + 依据 §5/§6 + 歧义裁决 #1/#6,勿改):
   - 渲染链:`(x,y)` → MapFile 瓦片记录 `(tile_id, sub_tile)` → `theater_spec(剧场)` → `TheaterAssets::open(assets)` → `lookup(ini_name)` → `TheaterIni::parse` → `file_name(tile_id, ext)` → `lookup(文件名)` → `TsTmpFile::parse` → `slot(sub_tile)` → 菱形像素。
-  - 铺canvas:cx×cy 画布,行 r(0..cy)宽 `4·min(r, cy−1−r)+2`,起始列 `(cx−w)/2`,行外区 = 调色板 0 号色(spec §4"索引 0 行外区照调色板 0 号色");`cx != 2·cy` → 退出 1(歧义裁决 #6;语料 13,020 个 TS TMP 全部 60×30,依据 §5)。
+  - 铺canvas:cx×cy 画布,行 r(0..cy)宽 `4·min(r+1, cy−1−r)`(勘误 2026-11-05:引擎 .data 两张 60×30 mask 表 0x3E2B5C/0x3EC4C8 行宽 [4,8,…,60,56,…,4,0] 逐行铁证;原 `4·min(r, cy−1−r)+2` 系误传作废),起始列 `(cx−w)/2`,行外区 = 调色板 0 号色(spec §4"索引 0 行外区照调色板 0 号色");`cx != 2·cy` → 退出 1(歧义裁决 #6;语料 13,020 个 TS TMP 全部 60×30,依据 §5)。
   - 调色板:先 `TheaterAssets::lookup(iso_palette_file)`(localmd/expandmd/ecache 等任意容器),回退 M2 链(ra2.mix → 匿名库 id 0x3B5A96DE → 按名);TEMPERATE/SNOW/URBAN 在本机可解,DESERT/NEWURBAN/LUNAR 报缺调色板退出 1(歧义裁决 #1)。
   - 退出 1 的全部路径(均有明确 stderr):格无记录 / tile<0 / 资产目录缺 ra2(ra2md) / 缺调色板 / 缺 INI / INI Err(LastTilesInSet 死路) / tile_id 界外 / 保留槽 / 文件未出货(stderr 给集合名,spec §4) / 空槽 / 解析失败 / 非 2:1 画布 / 写 PNG 失败。
 
@@ -2360,14 +2360,14 @@ fn run_extract_tile(
         );
         return ExitCode::from(1);
     }
-    // 菱形铺入 cx×cy 画布:行 r 宽 4·min(r, cy−1−r)+2,起始列 (cx−w)/2;
-    // 行外区 = 调色板 0 号色(spec §4)
+    // 菱形铺入 cx×cy 画布:行 r 宽 4·min(r+1, cy−1−r)(引擎 mask 表铁证,
+    // 末行宽 0 全背景),起始列 (cx−w)/2;行外区 = 调色板 0 号色(spec §4)
     let diamond = slot.diamond_pixels();
     let bg = palette.rgb8(0);
     let mut rgb = Vec::with_capacity(3 * cx as usize * cy as usize);
     let mut off = 0usize;
     for r in 0..cy as usize {
-        let w = 4 * r.min(cy as usize - 1 - r) + 2;
+        let w = 4 * (r + 1).min(cy as usize - 1 - r);
         let x0 = (cx as usize - w) / 2;
         for c in 0..cx as usize {
             let color = if c >= x0 && c < x0 + w {

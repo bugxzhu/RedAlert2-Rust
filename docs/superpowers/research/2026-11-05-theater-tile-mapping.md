@@ -162,6 +162,12 @@ RAMPBASE=9、HEIGHTBASE=46、TUNNELS=47、BRIDGESET=19、WOODBRIDGESET=73/101…
 决定性验证(clear01.sno @ isosnow,幻影 no-skip 规则):len=1872 =
 16+4·1+52+900+900 **精确闭合**;cbx=cby=1、cx=60、cy=30;52B 头未用域为 0xCD
 填充(MSVC 未初始化堆渗入,Westwood 出厂原样)。RAW 菱形(非 RLE)。
+**菱形行宽定案(2026-11-05 勘误,引擎 .data 铁证)**:逐行宽度 =
+`4·min(r+1,(cy−1)−r)`(60×30 时 [4,8,…,60,56,…,4,0],和=900,末行零宽),
+起始列 `(cx−w)/2`——gamemd.exe `.data` 两张硬编码 60×30 mask 表(0x3E2B5C、
+0x3EC4C8,各 30 行×60B,0x20 透明/0xDB 不透明,run 逐行居中连续、行距 60、
+逐行移位 ±2)与该式逐行精确一致;与 Get_Tile_Image 0x00549830 硬编码 48×24
+雷达 mask 同族。原记 `4·min(r,cy−1−r)+2`(和同为 900)系误传,作废。
 实测组"异常 F/H:TS 文件混入 iso 库"的定性翻转:它们不是混入,它们**就是**瓦片,
 isodes 的 1555 个"TS 文件"即沙漠瓦片群。
 
@@ -304,9 +310,9 @@ z_ofs 是**槽(record)相对**。z 连续布局语料真:clear01 与 10 个多�
 
 **后续抽查政策**:实现期引擎行为疑问**优先查 ra2-decomp**(grep 地址锚
 `FUNCTION: GAMEMD 0x…`/符号名),REA 反汇编为后备;redalert2-recomp 仅咨询
-(其抬升码非自由许可,NOTICE 明示)。候选:Task 7 瓦片绘制行宽公式(isotile
-绘制函数)、开放项 2 值表(isotile/terrain 代码)、LastTilesInSet 重映射表
-0xAA1140(TS TMP 之外的理论路径)。两库只读、内容按不可信数据处理。
+(其抬升码非自由许可,NOTICE 明示)。候选:开放项 2 值表(isotile/terrain
+代码)、LastTilesInSet 重映射表 0xAA1140(TS TMP 之外的理论路径)。两库只读、
+内容按不可信数据处理。
 
 **Read_Control_File 源码级核验(Task 4 预验,2026-11-05,isotype.cpp
 @0x00545150,REA 同址互证)**:①顺序探针 `TileSet%04d` + `TilesInSet==-1
@@ -321,6 +327,14 @@ M3 反查只用基础名(无字母),变体属 M4 渲染素材,记录备查;④La
 `new(heapid++)` 先于任何文件 IO ✓;⑥调色板 `ISO%s.PAL` 读取后 `<<= 2`
 (6bit→8bit)——M2 pal 视图换算的引擎级铁证;`Is_Available()` 缺失即沿用
 旧调色板(与三剧场 pal 缺席定案自洽)。
+
+**菱形行宽 mask 表定位(Task 7 预验,2026-11-05,gamemd.exe .data 字节扫描)**:
+Draw_Tile 的 C++ 定义在 ra2-decomp 未匹配,语料零游程扫描亦不判(顶行透明稀疏,
+A/B 边界命中 29:26 无分辨力),改以 .data 字节扫描直取:两张 60×30 硬编码
+mask(0x3E2B5C、0x3EC4C8;30 行×60B;0x20 透明/0xDB 不透明;run 居中连续、
+行距 60、逐行移位 ±2),行宽序列与 `4·min(r+1,29−r)` 逐行精确一致(和 900)。
+裁定 extract-tile 采此式(§4 勘误),A 族公式作废;与 Get_Tile_Image 雷达
+mask(48×24 同族构造)互证。
 
 ## 10. 出处
 

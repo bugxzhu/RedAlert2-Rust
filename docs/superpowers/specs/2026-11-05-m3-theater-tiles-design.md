@@ -95,8 +95,10 @@ M1b 误判(实为 TS SHP)、T9 容量测试失真。
      verify6),故本语料遇 Last≠Tiles 一律 `FormatError::Unsupported` 并在语料
      测试钉"零携带"断言,不实现重映射路径(YAGNI,规则已文档化)。
 - `tools/ra2-map` extract-tile 升级 — `(map, x, y)` → map 的剧场+tile_id+sub →
-  INI 反查文件名 → mix 取文件 → TsTmpFile 槽 sub → 菱形像素(行宽
-  4·min(r,cy−1−r)+2)铺入 cx×cy 画布,索引 0 行外区照调色板 0 号色 → rgb8 →
+  INI 反查文件名 → mix 取文件 → TsTmpFile 槽 sub → 菱形像素铺入 cx×cy 画布
+  (行宽 **4·min(r+1,cy−1−r)**;勘误 2026-11-05:gamemd .data 两张硬编码
+  60×30 mask 表 0x3E2B5C/0x3EC4C8 行宽 [4,8,…,60,56,…,4,0] 铁证,原
+  4·min(r,cy−1−r)+2 系误传作废;末行零宽全背景),行外区照调色板 0 号色 → rgb8 →
   png.rs(纯 std,复用);缺文件槽/空槽/越界 sub → 退出码 1 + 明确 stderr
   (未出货槽给出集合名)。
 - map_samples.rs T9 重钉:`snow_tile_index_within_theater_ini_capacity`
