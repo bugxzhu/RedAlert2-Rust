@@ -187,17 +187,50 @@ lobrdb08.sno 帧 1 偏移 152 = 8+24·6 精确;+0x0C..0x10 RGBA(unknown_d 值 = 
   snow 16(按名查找,与容器序无关)。
 - 空条目率(SHP 群)0.19~0.35;SHP 画布最大 253×242;TS TMP 画布 60×30 主频。
 
-## 9. 外部源考据(裁决后剩余待办)
+## 9. 外部源考据(gamemd.exe REA 抽查已回报,四问全裁)
 
-已由考据组+控制器证实者即 §3/§4/§5 主体。仍开放:
+2026-11-05 REA 代理对 gamemd.exe YR 1.001(sha256 7b8a0685…)做了四问抽查
+(PE 手工解析+capstone 反汇编,REA 深分析 provider 此环境不可用;全部地址
+按本 build 字符串 xref 定位,VA=旧 RVA+0x400000):
+
+1. **INI 选择(0x5349C0 Theater::Init + 读表函数 0x545150..0x546DA0)**:
+   全镜像唯一剧场 INI 格式串 = `"%sMD.INI"`(0x8295E8);**base INI 从不被打开**,
+   md INI 独立完整枚举(缺 md → Load 失败 → TilesInGetInt 返 −1 → 枚举即止)。
+   段探测为**顺序探针**(TileSet0000,0001,…):首个缺失段即终止枚举(与六 INI
+   实测编号连续无缺口自洽)。
+2. **mix 装载/搜索序(Init_Secondary_Mixes 0x5301A0;MixFileClass 链表
+   0x5B3C20/查找 0x5B4430)**:挂载序 expandmd99..00 → ra2md → ra2 → cachemd →
+   cache → localmd → local,ecache*/elocal*(0x530000)在其后,各剧场 5 mix 由
+   Theater::Init 逐场挂载;查找自链表头起**首个命中即返**。故同名文件优先级 =
+   expandmd99>…>expandmd00>ra2md>ra2>cachemd>cache>localmd>local>ecache>elocal>
+   剧场 mix。urbannmd 双版由(2)裁:expandmd01 版胜。**副产物**:gamemd 不自动
+   挂载裸 expand%02d.mix(仅 EXPANDMD%02d);ecache 排 localmd/local 之后
+   (与社区惯例相反);local.mix/localmd.mix 实为 ra2.mix/ra2md.mix 内嵌文件,
+   由 CCFileClass 按名在已挂载 mix 内寻得(嵌套 mix 按名挂载即此机制)。
+3. **缺文件槽行为**:索引分配先于任何文件 IO——0x546092 起,运行计数按
+   `TilesInSet`(或 `LastTilesInSet`,见下)前进,无回滚/无移位;文件全 miss
+   时槽 0 仍建 0x30C 字节对象并注册进全局向量(0xB0F670/0xA8ED28),槽 1..N−1
+   链到前一瓦片(+0x2F0 计数),继续枚举,**不报错不弹窗**。⇒ 未出货集合照常
+   占满 N 个全局槽(§3 假设证实)。`LastTilesInSet` 机制:存在且≠TilesInSet
+   时计数按 Last 前进,{base+Last, Tiles−Last} 对入 0xAA1078 向量,循环后经
+   0xAA1140 表重映射 TOTEMPERATETHEATER/TOSNOWTHEATER 目标。**六 md INI 普查
+   (verify6):0 集携带该键**——本语料 ΣTilesInSet 即引擎真容量,重映射路径死
+   代码;INI 键全集=FILENAME/SETNAME/TILESINSET/MARBLEMADNESS/NONMARBLEMADNESS/
+   MORPHABLE/LOWRADARCOLOR/HIGHRADARCOLOR/ALLOWBURROWING/ALLOWTIBERIUM/
+   ALLOWTOPLACE/REQUIREDFORRMG/TOTEMPERATETHEATER/TOSNOWTHEATER。
+4. **Theater::Array = VA 0x7E1B78(6×112B)**,记录布局:+0x00 名/​+0x10 UI 标/
+   +0x30 文件 stem/​+0x3A ISO stem/​+0x44 第二 ISO stem/​+0x4E 3 字符扩展/
+   +0x52 MM 后缀/​+0x56 字母码/​+0x58..0x64 环境光 4 float(M4 渲染金料:SNOW
+   绿 0.8/蓝 1.8125 等)/​+0x68、+0x6C int。六剧场 stem/扩展/md 名与本篇 §3/§8
+   表**逐项吻合**(NEWURBAN=URBANN/.UBN 独立铁证);**容量非二进制常量**,
+   纯运行期 ΣTilesInSet(与 3 自洽,数值只能语料定)。
+
+仍开放(不阻塞实现):
 1. 幻影 digest 的 XCC 判别语义(非加密 TS mix 摘要位含义);
-2. Theater::Array 0x3E1B78(6×112B)、Theater::Init 0x5349C0(INI 装载/选择)、
-   IsometricTileTypeClass ctor 0x5447C0 / Array 0xA8ED28、FindIndex 0x48DBE0 的
-   REA 核验——重点:base-vs-md INI 选择机制、expandmd01 覆盖序(urbannmd 双版
-   1175 vs 1189 语料不可分辨)、文件缺槽时引擎行为(跳过/占位/报错);
-3. terrain_type/ramp_type 值表逐值复核;
-4. TS 覆盖层文件身份(ovrpsb*/warub* 已由 MadHQ 消解为 Wood Bridges 瓦片,
-   warub* 族待核)。
+2. terrain_type/ramp_type 值表逐值复核;
+3. warub* 族文件身份(ovrpsb* 已由 MadHQ 消解为 Wood Bridges 瓦片);
+4. Theater::Init 五 mix 挂载中 rec+0x4E stem("%s.MIX"→"SNO.MIX"型)与
+   snow.mix(#A226651E)命名关系(对按名查找无影响,记录待考)。
 
 ## 10. 出处
 

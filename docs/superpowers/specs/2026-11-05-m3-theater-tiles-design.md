@@ -71,8 +71,19 @@ M1b 误判(实为 TS SHP)、T9 容量测试失真。
      expandmd01 版);
   3. `TheaterAssets::open(assets_dir)`:装载 ra2.mix、ra2md.mix、根级 expand*/ecache*
      并**递归下钻嵌套 mix(深度 ≤3,体量上限防炸)**构建 id→(容器,范围)索引;
-     同名 id 冲突时按 mod 覆盖惯例取后装载者(expand*>ecache*>ra2md>ra2 基序,
-     实现期以语料闭合校准);`lookup(name) -> Option<数据>`(mix_name_id)。
+     `lookup(name) -> Option<数据>`(mix_name_id)。
+     **勘误 2026-11-05(REA 裁定后)**:同名 id 冲突解析 = **先装载者胜**,装载/搜索
+     序镜像 gamemd 实测(Init_Secondary_Mixes 0x5301A0 + MixFile 查找 0x5B4430,
+     首 0x5301BA→0x530405 顺序):expandmd99..00 > ra2md > ra2 > cachemd > cache >
+     localmd > local > ecache* > elocal* > 各剧场 5 mix(Theater::Init 0x5349C0 逐场
+     挂载)。注意:gamemd **不**自动挂载裸 expand%02d.mix(仅 EXPANDMD%02d),
+     ecache 系排在 localmd/local **之后**(与社区惯例相反)——装载器照此实现;
+     递归发现的嵌套 mix(如 expandmd01 内匿名 #C31B4D61,1018 条,mod 供 Snow
+     瓦片)作为 mod 兜底层,优先级继承其根 mix、排该根直连条目之后。
+     `TheaterIni` 增:解析 `LastTilesInSet`(引擎规则:存在且≠TilesInSet 时索引
+     前进按 Last、差额重映射到表尾——研究 §9;**六 md INI 普查=0 集携带**,
+     verify6),故本语料遇 Last≠Tiles 一律 `FormatError::Unsupported` 并在语料
+     测试钉"零携带"断言,不实现重映射路径(YAGNI,规则已文档化)。
 - `tools/ra2-map` extract-tile 升级 — `(map, x, y)` → map 的剧场+tile_id+sub →
   INI 反查文件名 → mix 取文件 → TsTmpFile 槽 sub → 菱形像素(行宽
   4·min(r,cy−1−r)+2)铺入 cx×cy 画布,索引 0 行外区照调色板 0 号色 → rgb8 →
