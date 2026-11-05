@@ -1709,11 +1709,11 @@ fn mix_preflight(blob: &[u8]) -> bool {
     if blob.len() < 10 {
         return false;
     }
-    let flags = u32::from_le_bytes(blob[0..4].try_into().ok()?);
+    let flags = u32::from_le_bytes([blob[0], blob[1], blob[2], blob[3]]);
+    let count = u16::from_le_bytes([blob[4], blob[5]]);
     if flags & 0x0002_0000 != 0 || flags & !0x0003_0000 != 0 {
         return false;
     }
-    let count = u16::from_le_bytes(blob[4..6].try_into().ok()?);
     10 + 12 * count as usize <= blob.len()
 }
 
@@ -1997,7 +1997,7 @@ impl TheaterAssets {
         // ra2(0) → m1(1) → m2(2) → m3(3) → m4(4 超限不下钻):d3 可查,d4 不可查
         let d = temp_assets("depth");
         let m4 = make_mix(&[("d4.dat", b"x4")]);
-        let m3 = make_mix_raw(&[(0x1111_1111, &m4), ("d3.dat", b"x3")]);
+        let m3 = make_mix_raw(&[(0x1111_1111, &m4), (mix_name_id("d3.dat"), b"x3")]);
         let m2 = make_mix_raw(&[(0x2222_2222, &m3)]);
         let m1 = make_mix_raw(&[(0x3333_3333, &m2)]);
         put(&d, "ra2.mix", &make_mix_raw(&[(0x4444_4444, &m1)]));
@@ -2040,11 +2040,9 @@ fn loader_opens_real_assets_and_resolves_across_containers() {
     let a = TheaterAssets::open(&assets_dir()).unwrap();
     let clear = a.lookup("clear01.sno").expect("clear01.sno 应可达");
     assert_eq!(clear.len(), 1_872);
-    assert!(
-        a.origin("clear01.sno").unwrap().starts_with("ra2.mix"),
-        "{}",
-        a.origin("clear01.sno").unwrap()
-    );
+    // isosnow.mix 被拦截名单截流挂自身位(pos 1000+),origin = 本名
+    // (2026-11-05 全装载序模拟探针:41 容器/21 拦截命中,clear01 → isosnow.mix)
+    assert_eq!(a.origin("clear01.sno"), Some("isosnow.mix"));
     let ini_blob = a.lookup("urbannmd.ini").expect("urbannmd.ini 应可达");
     assert_eq!(ini_blob.len(), 36_725, "应取 expandmd01 版而非 localmd 的 32,614 B");
     let ini = TheaterIni::parse(&decode_map_text(ini_blob)).unwrap();
