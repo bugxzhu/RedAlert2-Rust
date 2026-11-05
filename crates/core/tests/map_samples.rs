@@ -91,33 +91,29 @@ fn corpus_walk_807_maps_all_parse() {
     );
 }
 
-/// 剧场交叉验证(spec §6-5):SNOW 图的最大 tile 索引 < snow.mix +
-/// SNOWMD.MIX 的 TMP 瓦片总数(2026-11-04 实测 343 文件/6804 瓦片 +
-/// 81 文件/3212 瓦片 = 10016 → 上界 10015;语料实测最大 963)。
+/// T9 重钉(M3,研究 §3):SNOW 图最大 tile 索引受**剧场 INI 枚举容量**约束
+/// (snowmd.ini,964 槽;M2 版"目录序 mix 求和 10016"是目录序规则被推翻前的
+/// 失真口径)。锚点:语料 106 张 SNOW 图 max tile = 963 = 容量−1;963 号槽 =
+/// clifxl04.sno(set0082 Cliff Ice LowPatch 末文件,位于 isosnomd)。
 #[test]
 #[ignore]
-fn snow_tile_index_within_theater_mix_capacity() {
+fn snow_tile_index_within_theater_ini_capacity() {
+    use ra2_core::format::map::mapdoc::decode_map_text;
     use ra2_core::format::mix::MixArchive;
-    fn tmp_tile_capacity(mix: &MixArchive) -> usize {
-        let mut total = 0usize;
-        for e in mix.entries() {
-            let b = mix.read_by_id(e.id).unwrap();
-            if b.len() >= 8 && b[0] == 0 && b[1] == 0 {
-                let tiles = b[6] as usize | ((b[7] as usize) << 8);
-                if 0 < tiles && tiles < 4096 {
-                    total += tiles;
-                }
-            }
-        }
-        total
-    }
-    let ra2 = MixArchive::parse(std::fs::read(assets_dir().join("ra2.mix")).unwrap()).unwrap();
-    let snow = MixArchive::parse(ra2.read("SNOW.MIX").unwrap().to_vec()).unwrap();
+    use ra2_core::format::theater::{SlotFile, TheaterIni};
+    // snowmd.ini:ra2md → localmd(显式链,不依赖 Task 5 装载器)
     let ra2md = MixArchive::parse(std::fs::read(assets_dir().join("ra2md.mix")).unwrap()).unwrap();
-    let snowmd = MixArchive::parse(ra2md.read("SNOWMD.MIX").unwrap().to_vec()).unwrap();
-    let capacity = tmp_tile_capacity(&snow) + tmp_tile_capacity(&snowmd);
-    assert_eq!(capacity, 10016);
-
+    let localmd = MixArchive::parse(ra2md.read("localmd.mix").unwrap().to_vec()).unwrap();
+    let ini = TheaterIni::parse(&decode_map_text(localmd.read("snowmd.ini").unwrap())).unwrap();
+    assert_eq!(ini.slot_count(), 964);
+    assert_eq!(
+        ini.file_name(963, "sno"),
+        Some(SlotFile::File("clifxl04.sno".into()))
+    );
+    // 963 号槽文件现存(isosnomd)
+    let isosnomd = MixArchive::parse(ra2md.read("isosnomd.mix").unwrap().to_vec()).unwrap();
+    assert!(isosnomd.read("clifxl04.sno").is_ok());
+    // 语料:106 张 SNOW 图,max tile 恰为容量−1
     let mut snow_maps = 0usize;
     let mut max_tile: i16 = -1;
     for p in map_files() {
@@ -138,10 +134,6 @@ fn snow_tile_index_within_theater_mix_capacity() {
         "Maps/** 下应有 106 张 SNOW 图,实得 {snow_maps}"
     );
     assert!(max_tile >= 0, "至少一张 SNOW 图应有瓦片");
-    assert!(
-        (max_tile as i64) < capacity as i64,
-        "tile {max_tile} 超过剧场瓦片容量 {capacity}"
-    );
     assert_eq!(max_tile, 963, "语料实测最大 SNOW tile(交流意见.map)");
 }
 
