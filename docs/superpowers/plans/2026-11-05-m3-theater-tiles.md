@@ -1638,6 +1638,7 @@ git commit -m "test(core): 六份 md 剧场 INI 真测(容量/LastTilesInSet 零
 
 **Files:**
 - Modify: `crates/core/src/format/theater.rs`(追加装载器层与其单测)
+- Modify: `crates/core/src/format/mix.rs`(仅一行:`MixEntry` 加 `#[derive(Clone)]`——`entries().to_vec()`/`entries.clone()` 所需;控制器裁定 2026-11-05,机械编译修)
 - Modify: `crates/core/tests/theater_samples.rs`(追加 2 个 ignored 测试)
 
 **Interfaces:**
@@ -1754,7 +1755,7 @@ fn walk(
     let s = *seq;
     *seq += 1;
     out.push(Mounted {
-        label,
+        label: label.clone(),
         data,
         data_start,
         entries: entries.clone(),
@@ -1915,7 +1916,7 @@ impl TheaterAssets {
 }
 ```
 
-> **偏差记录(实现时修正)**:`walk` 里 `format!("{label:#{}}", e.id)` 的格式串有误,实现时写为 `format!("{label}#{:08X}", e.id)`;`owned = out.last()...data.clone()` 的二次克隆可改为 `let owned = data.clone()`(walk 持有的原 Vec 在 push 时已克隆入册)——语义等价,取更直白写法。
+> **偏差记录(实现时修正)**:`walk` 里 `format!("{label:#{}}", e.id)` 的格式串有误,实现时写为 `format!("{label}#{:08X}", e.id)`;`out.push(Mounted { label, .. })` 处 label 被移动而下降循环仍需引用,实现时写 `label: label.clone()`(控制器裁定 2026-11-05);`walk` 8 参超 clippy `too_many_arguments` 阈(7),实现时加 `#[allow(clippy::too_many_arguments)]`(冷路径,草图既定形);`owned = out.last()...data.clone()` 的二次克隆可改为 `let owned = data.clone()`(walk 持有的原 Vec 在 push 时已克隆入册)——语义等价,取更直白写法。
 
 - [ ] **Step 2: 装载器单测(追加到 Task 4 建立的 `mod tests` 末尾,6 个)**
 
@@ -2040,8 +2041,8 @@ impl TheaterAssets {
     }
 ```
 
-Run: `cargo test -p ra2-core theater`
-Expected: 16 passed(TheaterIni 10 + 装载器 6)
+Run: `cargo test -p ra2-core format::theater::tests`
+Expected: 16 passed(TheaterIni 10 + 装载器 6;宽松子串 `theater` 会连带命中 theater_tmp/map::meta 共 ~30,精确模块过滤才是本步量具)
 
 - [ ] **Step 3: 装载器真测(ignored;`theater_samples.rs` 追加 2 个)**
 
