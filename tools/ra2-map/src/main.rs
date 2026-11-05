@@ -6,26 +6,26 @@
 //! 缺失;2 用法错误(含非 UTF-8 参数、坐标非整数)。usage 裁决先于任何
 //! 文件 IO;stdout 断管(BrokenPipe)视为成功。
 
+use ra2_core::format::map::mapdoc::decode_map_text;
 use ra2_core::format::map::meta::Theater;
 use ra2_core::format::map::objects::ObjectClass;
 use ra2_core::format::map::MapFile;
 use ra2_core::format::mix::MixArchive;
 use ra2_core::format::pal::Palette;
+use ra2_core::format::theater::{theater_spec, SlotFile, TheaterAssets, TheaterIni};
+use ra2_core::format::theater_tmp::TsTmpFile;
 use std::io::Write;
 use std::process::ExitCode;
 
 mod png;
 
-/// ra2.mix 内嵌调色板库的条目 ID(研究 §7.2;库本身按名可读)。
-const PALETTE_MIX_ID: u32 = 0x3B5A_96DE;
-
 fn usage() -> ! {
     eprintln!("用法: ra2-map info <file.map>");
     eprintln!("      ra2-map extract-tile <file.map> <x> <y> -o <file.png> [--assets <游戏目录>]");
-    eprintln!("说明: extract-tile 输出该格 60×30 菱形占位渲染(填充色 = 剧场 ISO");
-    eprintln!("      调色板第 tile%256 项);tile→TMP 真位图解析归 M3。缺 [--assets]");
-    eprintln!("      时取环境变量 RA2_ASSETS_DIR。DESERT/NEWURBAN/LUNAR 的 YR 调色板");
-    eprintln!("      不在本机安装中,将报缺资源(退出码 1)。");
+    eprintln!("说明: extract-tile 输出该格真瓦片位图(剧场 INI 反查 → TS TMP 槽位 →");
+    eprintln!("      60×30 等距菱形 → 剧场调色板上色;行外区为调色板 0 号色)。");
+    eprintln!("      缺 [--assets] 时取环境变量 RA2_ASSETS_DIR。DESERT/NEWURBAN/LUNAR");
+    eprintln!("      的 YR 调色板不在本机安装中,将报缺资源(退出码 1)。");
     std::process::exit(2);
 }
 
@@ -108,27 +108,23 @@ fn run_info(map_path: &str) -> ExitCode {
     write_stdout(out.as_bytes())
 }
 
-/// 剧场 ISO 调色板:ra2.mix → id 0x3B5A96DE 嵌套库 → <theater>.pal(768 B)。
-fn load_theater_palette(assets: &std::path::Path, theater: Theater) -> Result<Palette, String> {
-    let ra2 = MixArchive::parse(
-        std::fs::read(assets.join("ra2.mix")).map_err(|e| format!("读 ra2.mix: {e}"))?,
-    )
-    .map_err(|e| format!("解析 ra2.mix: {e}"))?;
-    let blob = ra2
-        .read_by_id(PALETTE_MIX_ID)
-        .map_err(|_| "ra2.mix 内找不到调色板库(id 3B5A96DE)".to_string())?
+/// 剧场 ISO 调色板:先全容器按名查(localmd/expandmd/ecache 等任意位置),
+/// 回退 M2 链(ra2.mix → 匿名调色板库 id 0x3B5A96DE → 按名)。
+fn load_theater_palette(assets: &TheaterAssets, theater: Theater) -> Result<Palette, String> {
+    let name = theater.iso_palette_file();
+    if let Some(bytes) = assets.lookup(name) {
+        return Palette::parse(bytes).map_err(|e| format!("调色板 {name} 768B 校验失败: {e}"));
+    }
+    const PALETTE_MIX_ID: u32 = 0x3B5A_96DE;
+    let blob = assets
+        .lookup_id(PALETTE_MIX_ID)
+        .ok_or_else(|| format!("调色板库(id 3B5A96DE)不可达,且 {name} 按名未找到"))?
         .to_vec();
-    let nested = MixArchive::parse(blob).map_err(|e| format!("解析调色板库: {e}"))?;
-    let pal_bytes = nested
-        .read(theater.iso_palette_file())
-        .map_err(|e| {
-            format!(
-                "调色板库内读 {}: {e}(YR 三剧场调色板不在本机安装)",
-                theater.iso_palette_file()
-            )
-        })?
-        .to_vec();
-    Palette::parse(&pal_bytes).map_err(|e| format!("调色板 768B 校验失败: {e}"))
+    let lib = MixArchive::parse(blob).map_err(|e| format!("解析调色板库: {e}"))?;
+    let pal = lib.read(name).map_err(|_| {
+        format!("{name} 在本机安装缺席(DESERT/NEWURBAN/LUNAR 的 YR 调色板;活体验收用 TEMPERATE/SNOW/URBAN)")
+    })?;
+    Palette::parse(pal).map_err(|e| format!("调色板 768B 校验失败: {e}"))
 }
 
 fn run_extract_tile(
@@ -136,7 +132,7 @@ fn run_extract_tile(
     x: i64,
     y: i64,
     out_path: &str,
-    assets: Option<&str>,
+    assets_opt: Option<&str>,
 ) -> ExitCode {
     let data = match std::fs::read(map_path) {
         Ok(d) => d,
@@ -165,7 +161,7 @@ fn run_extract_tile(
         eprintln!("格 ({x},{y}) 是无瓦片格(tile=-1)");
         return ExitCode::from(1);
     }
-    let assets_dir = assets.map(std::path::PathBuf::from).or_else(|| {
+    let assets_dir = assets_opt.map(std::path::PathBuf::from).or_else(|| {
         std::env::var("RA2_ASSETS_DIR")
             .ok()
             .map(std::path::PathBuf::from)
@@ -174,35 +170,124 @@ fn run_extract_tile(
         eprintln!("需要 --assets 或环境变量 RA2_ASSETS_DIR 指向游戏目录");
         return ExitCode::from(1);
     };
-    let palette = match load_theater_palette(&assets_dir, m.map_meta.theater) {
-        Ok(p) => p,
+    let spec = theater_spec(m.map_meta.theater);
+    let assets = match TheaterAssets::open(&assets_dir) {
+        Ok(a) => a,
         Err(e) => {
-            eprintln!("解析剧场调色板失败: {e}");
+            eprintln!("资产装载失败: {e}");
             return ExitCode::from(1);
         }
     };
-    // 60×30 菱形占位渲染:填充 = palette[tile%256](6 位→8 位换算);菱形外
-    // 黑(0,0,0)。菱形谓词 |2cx-59| + 2·|2cy-29| ≤ 60(中心 (29.5,14.5),确定性、可复现)
-    let idx = tile.tile as usize % 256;
-    let [r, g, b] = palette.rgb8(idx);
-    let (w, h) = (60u32, 30u32);
-    let mut rgb = vec![0u8; 3 * w as usize * h as usize];
-    for cy in 0..h as usize {
-        for cx in 0..w as usize {
-            let inside = (2 * cx as u32).abs_diff(59) + 2 * (2 * cy as u32).abs_diff(29) <= 60;
-            if inside {
-                let i = cy * 3 * w as usize + cx * 3;
-                rgb[i] = r;
-                rgb[i + 1] = g;
-                rgb[i + 2] = b;
-            }
+    let palette = match load_theater_palette(&assets, m.map_meta.theater) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("剧场调色板解析失败: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    let ini_bytes = match assets.lookup(spec.ini_name) {
+        Some(b) => b,
+        None => {
+            eprintln!("资产缺剧场表 {}", spec.ini_name);
+            return ExitCode::from(1);
+        }
+    };
+    let ini = match TheaterIni::parse(&decode_map_text(ini_bytes)) {
+        Ok(i) => i,
+        Err(e) => {
+            eprintln!("解析 {}: {e}", spec.ini_name);
+            return ExitCode::from(1);
+        }
+    };
+    let set_label = ini
+        .set_of(tile.tile as usize)
+        .map(|s| match s.name {
+            Some(n) => n,
+            None => format!("set{:04}", s.number),
+        })
+        .unwrap_or_else(|| "-".to_string());
+    let slot_file = match ini.file_name(tile.tile as usize, spec.ext) {
+        Some(sf) => sf,
+        None => {
+            eprintln!(
+                "tile_id {} 越界: {} 界内槽位 {}(spec 容量 {})",
+                tile.tile,
+                ini.slot_count(),
+                ini.slot_count(),
+                spec.capacity
+            );
+            return ExitCode::from(1);
+        }
+    };
+    let file_name = match slot_file {
+        SlotFile::Reserved => {
+            eprintln!(
+                "tile_id {} 是保留槽(集合 {set_label},无自有文件)",
+                tile.tile
+            );
+            return ExitCode::from(1);
+        }
+        SlotFile::File(name) => name,
+    };
+    let blob = match assets.lookup(&file_name) {
+        Some(b) => b,
+        None => {
+            eprintln!("瓦片文件 {file_name} 未出货(缺文件槽;集合 {set_label})");
+            return ExitCode::from(1);
+        }
+    };
+    let origin = assets.origin(&file_name).unwrap_or("?").to_string();
+    let tmp = match TsTmpFile::parse(blob) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("解析 {file_name}: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    let sub = tile.sub_tile as usize;
+    let slot = match tmp.slot(sub) {
+        Some(s) => s,
+        None => {
+            eprintln!(
+                "{file_name} 槽 {sub} 为空槽(槽网格 {}×{})",
+                tmp.dims().0,
+                tmp.dims().1
+            );
+            return ExitCode::from(1);
+        }
+    };
+    let (cbx, cby, cx, cy) = tmp.dims();
+    if cx != 2 * cy {
+        eprintln!("{file_name} 画布 {cx}×{cy} 非 2:1 等距菱形,M3 渲染仅支持 2:1(语料全部 60×30)");
+        return ExitCode::from(1);
+    }
+    // 菱形铺入 cx×cy 画布:行 r 宽 4·min(r+1, cy−1−r)(引擎 mask 表铁证,
+    // 末行宽 0 全背景),起始列 (cx−w)/2;行外区 = 调色板 0 号色(spec §4)
+    let diamond = slot.diamond_pixels();
+    let bg = palette.rgb8(0);
+    let mut rgb = Vec::with_capacity(3 * cx as usize * cy as usize);
+    let mut off = 0usize;
+    for r in 0..cy as usize {
+        let w = 4 * (r + 1).min(cy as usize - 1 - r);
+        let x0 = (cx as usize - w) / 2;
+        for c in 0..cx as usize {
+            let color = if c >= x0 && c < x0 + w {
+                let idx = diamond[off] as usize;
+                off += 1;
+                palette.rgb8(idx)
+            } else {
+                bg
+            };
+            rgb.extend_from_slice(&color);
         }
     }
-    match png::write_png_file(std::path::Path::new(out_path), w, h, &rgb) {
+    debug_assert_eq!(off, diamond.len());
+    match png::write_png_file(std::path::Path::new(out_path), cx, cy, &rgb) {
         Ok(()) => {
             eprintln!(
-                "已写 {out_path}(60×30 占位渲染;tile {} → 调色板项 {idx})",
-                tile.tile
+                "已写 {out_path}: {file_name} 槽 {sub}(剧场 {}, INI 容量 {}, 画布 {cx}×{cy}, 槽网格 {cbx}×{cby}, 来源 {origin})",
+                format_args!("{:?}", m.map_meta.theater),
+                ini.slot_count(),
             );
             ExitCode::SUCCESS
         }

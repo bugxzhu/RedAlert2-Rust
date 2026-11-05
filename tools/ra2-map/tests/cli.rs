@@ -236,41 +236,128 @@ fn extract_tile_without_assets_exits_1() {
     assert!(!out_path.exists());
 }
 
-/// 真图活体验收(spec §6-7):TEMPERATE 图 extract-tile 产出可解析的
-/// 60×30 PNG;info 对三张不同剧场图全部成功(info 不需要调色板)。
+/// 解码 png.rs 的单 IDAT(zlib store)→ 原始扫描行(每行 1 过滤字节 + 3·w)。
+fn decode_store_idat(png: &[u8]) -> Vec<u8> {
+    let mut pos = 8usize;
+    let mut idat: Vec<u8> = Vec::new();
+    while pos + 12 <= png.len() {
+        let len = u32::from_be_bytes(png[pos..pos + 4].try_into().unwrap()) as usize;
+        let kind = &png[pos + 4..pos + 8];
+        if kind == b"IDAT" {
+            idat.extend_from_slice(&png[pos + 8..pos + 8 + len]);
+        }
+        if kind == b"IEND" {
+            break;
+        }
+        pos += 12 + len;
+    }
+    assert_eq!(&idat[..2], &[0x78, 0x01], "zlib store 头");
+    let mut out = Vec::new();
+    let mut p = 2usize;
+    loop {
+        let header = idat[p];
+        let n = u16::from_le_bytes(idat[p + 1..p + 3].try_into().unwrap()) as usize;
+        out.extend_from_slice(&idat[p + 5..p + 5 + n]);
+        p += 5 + n;
+        if header & 1 == 1 {
+            break; // BFINAL
+        }
+    }
+    out
+}
+
+/// 不同 RGB 三元组数(跳过每行过滤字节)。
+fn distinct_colors(scanlines: &[u8], w: u32) -> usize {
+    use std::collections::BTreeSet;
+    let stride = 1 + 3 * w as usize;
+    let mut set = BTreeSet::new();
+    let mut y = 0usize;
+    while y * stride + stride <= scanlines.len() {
+        let row = &scanlines[y * stride + 1..y * stride + stride];
+        for px in row.as_chunks::<3>().0 {
+            set.insert(*px);
+        }
+        y += 1;
+    }
+    set.len()
+}
+
+/// 真图活体验收(M3;spec §6-6 按歧义裁决 #1 落地):TEMPERATE/SNOW/URBAN
+/// 各一图 extract-tile 产出 60×30、像素多值的 PNG(非占位非单色);
+/// DESERT 图因 isodes.pal 缺席退出 1(stderr 提调色板);info 三剧场不变。
 #[test]
 #[ignore]
-fn real_maps_info_and_extract_tile() {
+fn real_maps_extract_tile_three_theaters() {
+    use ra2_core::format::map::MapFile;
     let assets = std::env::var("RA2_ASSETS_DIR").expect("需要 RA2_ASSETS_DIR");
-    let dir = temp_dir("real");
-    // 1) extract-tile:c1a01md (87,1) → PNG(签名/IEND/IHDR 尺寸)
-    let map = std::path::Path::new(&assets).join("Maps/Cooperative/c1a01md.map");
-    let out_path = dir.join("tile.png");
+    let dir = temp_dir("real-m3");
+    for rel in [
+        "Maps/Cooperative/c1a01md.map", // TEMPERATE
+        "Maps/Cooperative/c1a03md.map", // SNOW
+        "Maps/Standard/hillbtwn.map",   // URBAN
+    ] {
+        let map_path = std::path::Path::new(&assets).join(rel);
+        // 取首个有效瓦片格(确定性;不硬编码坐标)
+        let data = std::fs::read(&map_path).unwrap();
+        let m = MapFile::parse(&data).unwrap();
+        let rec = m
+            .tiles
+            .records()
+            .iter()
+            .find(|r| r.tile >= 0)
+            .expect("至少一条瓦片记录");
+        let out_path = dir.join("tile.png");
+        let out = Command::new(bin())
+            .args([
+                "extract-tile",
+                map_path.to_str().unwrap(),
+                &rec.x.to_string(),
+                &rec.y.to_string(),
+                "-o",
+                out_path.to_str().unwrap(),
+            ])
+            .env("RA2_ASSETS_DIR", &assets)
+            .output()
+            .unwrap();
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "{rel}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let png = std::fs::read(&out_path).unwrap();
+        assert_eq!(png[16..20], 60u32.to_be_bytes(), "{rel}");
+        assert_eq!(png[20..24], 30u32.to_be_bytes(), "{rel}");
+        let scanlines = decode_store_idat(&png);
+        assert!(
+            distinct_colors(&scanlines, 60) >= 2,
+            "{rel} 应像素多值(非占位)"
+        );
+        let _ = std::fs::remove_file(&out_path);
+    }
+    // DESERT 负向(歧义裁决 #1):isodes.pal 缺席 → 退出 1
+    let map_path = std::path::Path::new(&assets).join("Maps/Cooperative/c2s02md.map");
+    let data = std::fs::read(&map_path).unwrap();
+    let m = MapFile::parse(&data).unwrap();
+    let rec = m.tiles.records().iter().find(|r| r.tile >= 0).unwrap();
+    let out_path = dir.join("tile-desert.png");
     let out = Command::new(bin())
         .args([
             "extract-tile",
-            map.to_str().unwrap(),
-            "87",
-            "1",
+            map_path.to_str().unwrap(),
+            &rec.x.to_string(),
+            &rec.y.to_string(),
             "-o",
             out_path.to_str().unwrap(),
         ])
         .env("RA2_ASSETS_DIR", &assets)
         .output()
         .unwrap();
-    assert_eq!(
-        out.status.code(),
-        Some(0),
-        "stderr: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let png = std::fs::read(&out_path).unwrap();
-    assert_eq!(&png[..8], &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]);
-    assert_eq!(png[16..20], 60u32.to_be_bytes());
-    assert_eq!(png[20..24], 30u32.to_be_bytes());
-    let n = png.len();
-    assert_eq!(&png[n - 8..n - 4], b"IEND");
-    // 2) info 三剧场冒烟
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("调色板"), "{stderr}");
+    assert!(!out_path.exists());
+    // info 三剧场冒烟(info 不需要调色板,M2 契约)
     for (rel, theater) in [
         ("Maps/Cooperative/c1a01md.map", "TEMPERATE"),
         ("Maps/Cooperative/c1a03md.map", "SNOW"),
