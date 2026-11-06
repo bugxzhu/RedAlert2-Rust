@@ -233,6 +233,18 @@ impl MapFile {
             },
         })
     }
+
+    /// [Map]Size 的 (W,H),与解析期同规则:合法域 1..=4096,否则 (300,300)
+    /// 兜底(瓦片记录数上界按兜底口径放行,渲染遍历须与之一致)。
+    pub fn size_wh(&self) -> (u16, u16) {
+        let w = self.map_meta.size[2];
+        let h = self.map_meta.size[3];
+        if (1..=4096).contains(&w) && (1..=4096).contains(&h) {
+            (w as u16, h as u16)
+        } else {
+            (300, 300)
+        }
+    }
 }
 
 #[cfg(test)]
