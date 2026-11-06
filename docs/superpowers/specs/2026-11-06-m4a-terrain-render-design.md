@@ -87,12 +87,17 @@ tools/ra2-map/src/main.rs         // render 子命令(I/O 壳)+ extract-tile 改
 
 1. 807 图全量 `render_terrain` 零 panic(ignored 真资产套件,性能预算见
    研究任务③);
-2. 逐剧场抽样图各 ≥1 张出 PNG(六剧场全覆盖)+ 尺寸公式钉死断言;
+2. 真彩三剧场(TEMPERATE/SNOW/URBAN)各 ≥1 张出 PNG + 缺调色板三剧场
+   (DESERT/NEWURBAN/LUNAR)哑调色板零 panic 全覆盖(勘误 2026-11-06:
+   isodes/isoubn/isolun.pal 本机缺席,全容器按名+0x3B5A96DE 库回退探针
+   证实)+ 尺寸公式钉死断言;
 3. 投影/接缝/z 偏移锚点:角格/中心格/已知悬崖格像素坐标合成测试钉死
    (对 decomp 取证式);
 4. Preview 对拍按研究任务②裁定:内嵌预览与纯地形差异可忽略 → 采样图
    像素差率阈值入回归;差异系统性(预览含矿石等 overlay)→ M4a 以锚点
-   验收,Preview 对拍顺延 M4b 终验(spec 勘误记录);
+   验收,Preview 对拍顺延 M4b 终验(spec 勘误记录)(2026-11-06 裁定:
+   走向 B——507 真彩图最优组合差率 <10% 为 0、中位 91.3%、组合不集中;
+   对拍顺延 M4b 终验,量级注记见研究文档);
 5. 缺槽统计与 M3 缺档账(NEWURBAN 383 等)一致或给出差异解释。
 
 ## 7. CLI 契约(`tools/ra2-map`,退出码 0/1/2 契约不变)
