@@ -333,6 +333,28 @@ fn walk(
     }
 }
 
+/// 根 mix 名大小写不敏感读取(引擎 DOS 世系语义;终审 RECORD 2026-11-06):
+/// Windows 文件系统原生不敏感,Linux 等敏感平台先精确读、失败再目录扫描
+/// 忽略大小写匹配一次。ecache*/elocal* 走 read_dir 列表天然不敏感。
+fn read_mix_ci(dir: &std::path::Path, name: &str) -> std::io::Result<Vec<u8>> {
+    match std::fs::read(dir.join(name)) {
+        Ok(data) => Ok(data),
+        Err(e) => {
+            for entry in std::fs::read_dir(dir)? {
+                let entry = entry?;
+                if entry
+                    .file_name()
+                    .to_string_lossy()
+                    .eq_ignore_ascii_case(name)
+                {
+                    return std::fs::read(entry.path());
+                }
+            }
+            Err(e)
+        }
+    }
+}
+
 impl TheaterAssets {
     /// 按引擎挂载序装载(spec §4 + REA 勘误;见模块注释)。
     pub fn open(assets_dir: &std::path::Path) -> Result<Self, FormatError> {
@@ -340,19 +362,19 @@ impl TheaterAssets {
         // expandmd99..expandmd00(pos = 99−nn,高位先)
         for nn in (0..=99u32).rev() {
             let name = format!("expandmd{nn:02}.mix");
-            if let Ok(data) = std::fs::read(assets_dir.join(&name)) {
+            if let Ok(data) = read_mix_ci(assets_dir, &name) {
                 roots.push((99 - nn as usize, name, data));
             }
         }
         // ra2md / ra2(必需)
         for (pos, name) in [(100usize, "ra2md.mix"), (101, "ra2.mix")] {
-            let data = std::fs::read(assets_dir.join(name))
+            let data = read_mix_ci(assets_dir, name)
                 .map_err(|e| FormatError::Invalid(format!("必需资产 {name} 读取失败: {e}")))?;
             roots.push((pos, name.to_string(), data));
         }
         // cachemd / cache(可选,缺席即跳)
         for (pos, name) in [(102usize, "cachemd.mix"), (103, "cache.mix")] {
-            if let Ok(data) = std::fs::read(assets_dir.join(name)) {
+            if let Ok(data) = read_mix_ci(assets_dir, name) {
                 roots.push((pos, name.to_string(), data));
             }
         }
@@ -407,6 +429,11 @@ impl TheaterAssets {
                 );
             }
         }
+        // 已知局限(单趟拦截,终审 RECORD 2026-11-06):回挂 walk 途中再命中的
+        // 拦截名仅被**更后位号**消化——localmd/local(104/105)先回挂,其内嵌
+        // 剧场 mix 可被 1000+i 全捕获;剧场 mix 内再嵌剧场 mix 只有名单序更后者
+        // 才被处理,循环后仍滞留 holdback_hits 的按"单趟收敛"简化丢弃。语料
+        // 嵌套 ≤2 层零出现;引擎多趟收敛差异仅理论可达,M4 需要时再迭代。
         for (i, name) in THEATER_MIX_NAMES.iter().enumerate() {
             if let Some(data) = holdback_hits.remove(name) {
                 walk(
@@ -453,9 +480,9 @@ impl TheaterAssets {
         })
     }
 
-    fn slot_of(&self, id: u32) -> Option<(usize, &IndexEntry)> {
+    fn slot_of(&self, id: u32) -> Option<&IndexEntry> {
         let i = self.index.binary_search_by_key(&id, |e| e.id).ok()?;
-        Some((self.index[i].container, &self.index[i]))
+        Some(&self.index[i])
     }
 
     /// 按名查找(文件名大小写/斜杠规则同 mix_name_id)。
@@ -465,14 +492,15 @@ impl TheaterAssets {
 
     /// 按 id 直查(匿名嵌套库等)。
     pub fn lookup_id(&self, id: u32) -> Option<&[u8]> {
-        let (c, e) = self.slot_of(id)?;
-        Some(&self.containers[c].data[e.start..e.start + e.len])
+        let e = self.slot_of(id)?;
+        let c = &self.containers[e.container];
+        Some(&c.data[e.start..e.start + e.len])
     }
 
     /// 诊断:命中容器标签(如 ra2.mix / ra2.mix#0F5D1D99)。
     pub fn origin(&self, name: &str) -> Option<&str> {
-        let (c, _) = self.slot_of(mix_name_id(name))?;
-        Some(self.containers[c].label.as_str())
+        let e = self.slot_of(mix_name_id(name))?;
+        Some(self.containers[e.container].label.as_str())
     }
 }
 
@@ -757,5 +785,26 @@ mod tests {
     fn max_descend_bytes_const_pinned() {
         // 语料最大嵌套容器约 35.7 MB;256 MiB 为防炸护栏(依据 §1)
         assert_eq!(MAX_DESCEND_BYTES, 268_435_456);
+    }
+
+    #[test]
+    fn whitespace_file_name_is_reserved() {
+        // 纯空白 FileName(终审 RECORD 微测):trim 后为空 → 视同缺键,
+        // 有 tiles 仍占位(Reserved),与引擎 FileName 缺省语义一致
+        let t = ini("[TileSet0000]\nFileName=   \nTilesInSet=2\n");
+        assert_eq!(t.slot_count(), 2);
+        assert_eq!(t.file_name(0, "sno"), Some(SlotFile::Reserved));
+        assert_eq!(t.file_name(1, "sno"), Some(SlotFile::Reserved));
+    }
+
+    #[test]
+    fn root_mix_names_case_insensitive() {
+        // 根 mix 名大小写不敏感(引擎 DOS 世系;Windows 原生不敏感,
+        // Linux 走 read_mix_ci 回退扫描——终审 RECORD 2026-11-06)
+        let d = temp_assets("root-ci");
+        put(&d, "RA2MD.MiX", &make_mix(&[("probe.dat", b"from-ra2md")]));
+        put(&d, "ra2.mix", &make_mix(&[]));
+        let a = TheaterAssets::open(&d).unwrap();
+        assert_eq!(a.lookup("probe.dat").unwrap(), b"from-ra2md");
     }
 }

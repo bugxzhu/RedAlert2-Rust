@@ -458,4 +458,38 @@ mod tests {
             Err(FormatError::Invalid(_))
         ));
     }
+
+    #[test]
+    fn bitfield_all_three_bits_consultative() {
+        // bitfield=0b111(终审 RECORD 微测):bit2=IsRandomized 纯咨询位
+        // (MarbleMadness 图形池属 M4 渲染素材,不影响解析);bit0=IsHasExtraData
+        // 的 extra 数据按 extra_ofs 绝对偏移另行存放,不占槽体尺寸(M3 语料
+        // 零出现,头字段原样透传)——槽体仍 = 52 头+菱形+z(bit1),解析闭合
+        let diamond: Vec<u8> = (1..=16).collect();
+        let z = vec![0x5Au8; 16];
+        let blob = slot_bytes(0b111, &diamond, Some(&z));
+        let data = tmp_bytes(1, 1, 8, 4, &[20], &blob);
+        let f = TsTmpFile::parse(&data).unwrap();
+        let s = f.slot(0).unwrap();
+        assert_eq!(s.header.bitfield, 0b111);
+        assert!(s.header.is_has_extra_data());
+        assert!(s.header.is_has_z_data());
+        assert!(s.header.is_randomized());
+        assert_eq!(s.diamond_pixels(), &diamond);
+        assert_eq!(s.z_data(), Some(&z[..]));
+    }
+
+    #[test]
+    fn rejects_z_truncated() {
+        // z 截断(终审 RECORD 微测):bit1 置位但文件在 z 段中截断 1 B
+        // → 精确槽体 52+16+16 = 84,20+84 = 104 > 103 → Invalid
+        let blob = slot_bytes(2, &[7u8; 16], Some(&[0x5Au8; 16]));
+        let mut data = tmp_bytes(1, 1, 8, 4, &[20], &blob);
+        assert_eq!(data.len(), 104);
+        data.truncate(103);
+        assert!(matches!(
+            TsTmpFile::parse(&data),
+            Err(FormatError::Invalid(_))
+        ));
+    }
 }
