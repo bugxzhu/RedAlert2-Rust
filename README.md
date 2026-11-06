@@ -47,3 +47,7 @@ AUD(IMA ADPCM,XCC 变体步长表)、VXL、HVA。
     ra2-mix list <file.mix>
     ra2-mix extract <file.mix> <文件名> -o <目录|->
     ra2-mix cat <file.mix> <文件名>
+
+## ra2-map
+
+    ra2-map render <map.map> -o <out.png> [--assets <dir>]   # M4a 整幅地形渲染 PNG(等距投影/z 接缝/缺环统计;本机真彩限 TEMPERATE/SNOW/URBAN)
