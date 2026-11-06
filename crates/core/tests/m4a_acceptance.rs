@@ -97,10 +97,11 @@ fn m4a_all_maps_render_and_samples() {
         let t0 = std::time::Instant::now();
         let r = render_terrain(&m, &assets, &ini, &pal).expect("全量合成零 panic");
         let ms = t0.elapsed().as_millis();
-        // 预算:暂用计划硬帽 10s(域改菱形记录口径后待实测回填;控制器终审后定常量)。
+        // 预算 = 实测 max 2995ms(被遗忘者.map,C1 菱形域口径)×3 ≈ 8985
+        // 取整 9000,计划硬帽 10s 内(修复前 1084ms 系矩形域欠绘的假低值,勿作基线)。
         assert!(
-            ms < 10_000,
-            "{} 耗时 {ms}ms 超 M4a 预算(计划硬帽 10s)",
+            ms < 9_000,
+            "{} 耗时 {ms}ms 超 M4a 预算(计划硬帽 10s 内)",
             path.display()
         );
         total += 1;
