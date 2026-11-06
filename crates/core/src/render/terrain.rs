@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 //! 地形层合成(M4a 第一层;M4b 的 overlay/物件层在本画布结构上追加)。
+//! 格域 = M2 裁定的菱形走位(存储 (x,y) 权威,研究 2026-11-04 §3.2/§3.6),
+//! 非 w×h 矩形;画布尺寸由走位极值决定。
 
 use crate::format::pal::Palette;
 
@@ -41,6 +43,36 @@ use crate::format::theater::{theater_spec, SlotFile, TheaterAssets, TheaterIni};
 use crate::format::theater_tmp::TsTmpFile;
 use crate::format::FormatError;
 
+/// §3.2 菱形走位极值(研究 2026-11-04 的 XCC walk 伪代码逐字回放):只推
+/// (x_line, r_line, y) 三变量、不物化格子,O(W+H) 次迭代。返回发射格全体
+/// 上 d = x+y 与 xmy = x−y 的 (d_min, d_max, xmy_min, xmy_max)。
+/// 画布尺寸由它决定:每 (w,h) 确定(与记录集无关),验收/CLI 可独立重算
+/// 对拍。语义注记:发射格总数 = 行走容量 (2W−1)·H,发射行数 = W+H−1,
+/// d 跨度 = 2H−1——闭式在无平台段小图((1,1) 等)不齐,故一律回放。
+pub fn walk_extremes(w: u16, h: u16) -> (i64, i64, i64, i64) {
+    let (cx, cy) = (i64::from(w), i64::from(h));
+    let (mut x_line, mut r_line, mut y) = (cx, cx + 1, 1i64);
+    let (mut d_min, mut d_max) = (i64::MAX, i64::MIN);
+    let (mut xmy_min, mut xmy_max) = (i64::MAX, i64::MIN);
+    while x_line < r_line {
+        // 行 y 发射闭式区间 [x_line, r_line−1](伪代码 `for x in x_line..r_line-1`)
+        d_min = d_min.min(x_line + y);
+        d_max = d_max.max(r_line - 1 + y);
+        xmy_min = xmy_min.min(x_line - y);
+        xmy_max = xmy_max.max(r_line - 1 - y);
+        x_line += if y < cx { -1 } else { 1 };
+        r_line += if y < cy {
+            1
+        } else if y > cy {
+            -1
+        } else {
+            0
+        };
+        y += 1;
+    }
+    (d_min, d_max, xmy_min, xmy_max)
+}
+
 /// 整图合成入口(spec §4):剧场表/资产/调色板由调用方装载(CLI 复用
 /// extract-tile 的装载链);内部委托 [`compose_terrain`]。
 pub fn render_terrain(
@@ -50,46 +82,43 @@ pub fn render_terrain(
     palette: &Palette,
 ) -> Result<TerrainRender, FormatError> {
     let (w, h) = map.size_wh();
-    let mut cells: Vec<Option<IsoTile>> = vec![None; w as usize * h as usize];
-    for y in 0..h {
-        for x in 0..w {
-            if let Some(t) = map.tiles.cell(x, y) {
-                cells[y as usize * w as usize + x as usize] = Some(IsoTile {
-                    x,
-                    y,
-                    tile: t.tile,
-                    sub_tile: t.sub_tile,
-                    z: t.z,
-                });
-            }
-        }
-    }
+    // 存储 (x,y) 权威(§3.6):迭代 records() 而非 w×h 矩形重构——画布域
+    // 是菱形走位(W+H−1 行、(2W−1)·H 格),缺格 = 虚空(不画不计)。
+    let mut records = map.tiles.records().to_vec();
+    // 画序:d = x+y 升序近平后画(records() 原序 cell_key = y<<16|x,稳定
+    // 排序后同 d 保持 y 升序;同 d 格横距恰 60px 无列重叠,同 d 内序不敏感)。
+    records.sort_by_key(|t| u32::from(t.x) + u32::from(t.y));
     let spec = theater_spec(map.map_meta.theater);
-    compose_terrain(w, h, &cells, assets, ini, spec.ext, palette)
+    compose_terrain(w, h, &records, assets, ini, spec.ext, palette)
 }
 
-/// 纯合成核(测试直打):行主序 cells,行对角线 d=x+y 升序近平后画。
-/// 画布 W=30·(w+h),H=15·(w+h)+15·z_max,原点 ox=30·(h−1)/oy=15·z_max。
+/// 纯合成核(测试直打):`records` 须已按 d = x+y 升序(render_terrain
+/// 稳定排序)。画布由走位极值决定(walk_extremes 回放,与记录集无关):
+///   W_px = 30·(xmy_max − xmy_min) + 60
+///   H_px = 15·(d_max − d_min) + 30 + 15·z_max(z_max = 记录最大 z,空集 0)
+/// 投影:sx = 30·(x−y−xmy_min),sy = 15·z_max + 15·(d−d_min) − 15·z
+/// (z_max 项给顶部抬升格留白,极值菱形恰贴画布缘,测试钉死零裁切)。
 pub(crate) fn compose_terrain(
     w: u16,
     h: u16,
-    cells: &[Option<IsoTile>],
+    records: &[IsoTile],
     assets: &TheaterAssets,
     ini: &TheaterIni,
     ext: &str,
     palette: &Palette,
 ) -> Result<TerrainRender, FormatError> {
-    let (w, h) = (w as usize, h as usize);
-    let z_max = cells.iter().flatten().map(|t| t.z).max().unwrap_or(0) as usize;
-    let width = CELL_DX * (w + h);
-    let height = CELL_DY * (w + h) + Z_STEP * z_max;
+    let (w, h) = (w.max(1), h.max(1)); // 防御钳制(iso.rs 同款;size_wh 已保证 ≥1)
+    let (d_min, d_max, xmy_min, xmy_max) = walk_extremes(w, h);
+    let z_max = records.iter().map(|t| t.z).max().unwrap_or(0) as usize;
+    let width = CELL_DX * ((xmy_max - xmy_min) as usize) + 2 * CELL_DX;
+    let height = CELL_DY * ((d_max - d_min) as usize) + 2 * CELL_DY + Z_STEP * z_max;
+    // 护栏先于分配与遍历(4096² 敌意 → 245,760×122,895 ≈ 30 Gpx 拒)
     if width as u64 * height as u64 > MAX_RENDER_PIXELS {
         return Err(FormatError::Invalid(format!(
             "画布 {width}×{height} = {} px 超 MAX_RENDER_PIXELS {MAX_RENDER_PIXELS}(敌意 [Map]Size?)",
             width as u64 * height as u64
         )));
     }
-    let oy = Z_STEP * z_max; // x 向原点已并入 sx 公式(h−1+2x−d)
     let bg = palette.rgb8(0);
     let mut rgb = vec![0u8; 3 * width * height];
     // clippy chunks_exact_to_as_chunks(Rust 1.99 deny-by-default):as_chunks_mut
@@ -98,61 +127,56 @@ pub(crate) fn compose_terrain(
         chunk.copy_from_slice(&bg);
     }
     let mut stats = RenderStats {
-        cells: cells.len(),
+        cells: records.len(), // 口径 = 记录数(含 tile=−1;走位缺格不在遍历内)
         ..RenderStats::default()
     };
-    // 行对角线序:d = x+y 升序(近平后画;同对角线互不重叠)。
-    for d in 0..(w + h).saturating_sub(1) {
-        let x_lo = d.saturating_sub(h - 1);
-        let x_hi = d.min(w - 1);
-        for x in x_lo..=x_hi {
-            let Some(t) = cells[(d - x) * w + x] else {
-                stats.no_tile += 1; // 界内无记录(口径含无瓦片格)
-                continue;
-            };
-            if t.tile < 0 {
-                stats.no_tile += 1;
-                continue;
-            }
-            match ini.file_name(t.tile as usize, ext) {
-                None => stats.out_of_range += 1,
-                Some(SlotFile::Reserved) => stats.reserved += 1,
-                Some(SlotFile::File(name)) => {
-                    let Some(blob) = assets.lookup(&name) else {
-                        stats.missing_file += 1;
-                        continue;
-                    };
-                    match TsTmpFile::parse(blob) {
-                        Err(_) => stats.parse_fail += 1,
-                        Ok(tmp) => match tmp.slot(t.sub_tile as usize) {
-                            None => stats.missing_slot += 1,
-                            Some(slot) => {
-                                let (_, _, cx, cy) = tmp.dims();
-                                // sx = ox + 30·(x−y),y = d−x → 2x−d;并入 ox:
-                                // h−1+2x−d ∈ [0, w+h−2] 恒非负,免 isize
-                                let sx = CELL_DX * (h - 1 + 2 * x - d);
-                                // sy = oy + 15·d − 15·z;oy ≥ 15·z 恒成立,
-                                // 左结合求值无下溢
-                                let sy = oy + CELL_DY * d - Z_STEP * t.z as usize;
-                                if cx as usize != 2 * cy as usize
-                                    || !blit_diamond(
-                                        &mut rgb,
-                                        width,
-                                        sx,
-                                        sy,
-                                        cx as usize,
-                                        cy as usize,
-                                        palette,
-                                        slot.diamond_pixels(),
-                                    )
-                                {
-                                    stats.parse_fail += 1; // 非 2:1/阶梯不闭合
-                                } else {
-                                    stats.painted += 1;
-                                }
+    // d 升序近平后画;每条记录恰落七类计数器之一(恒等式见 RenderStats)。
+    for t in records {
+        if t.tile < 0 {
+            stats.no_tile += 1; // 无瓦片记录(斜坡边格)
+            continue;
+        }
+        match ini.file_name(t.tile as usize, ext) {
+            None => stats.out_of_range += 1,
+            Some(SlotFile::Reserved) => stats.reserved += 1,
+            Some(SlotFile::File(name)) => {
+                let Some(blob) = assets.lookup(&name) else {
+                    stats.missing_file += 1;
+                    continue;
+                };
+                match TsTmpFile::parse(blob) {
+                    Err(_) => stats.parse_fail += 1,
+                    Ok(tmp) => match tmp.slot(t.sub_tile as usize) {
+                        None => stats.missing_slot += 1,
+                        Some(slot) => {
+                            let (_, _, cx, cy) = tmp.dims();
+                            let d = i64::from(t.x) + i64::from(t.y);
+                            let xmy = i64::from(t.x) - i64::from(t.y);
+                            let sx = CELL_DX as i64 * (xmy - xmy_min);
+                            let sy = Z_STEP as i64 * z_max as i64 + CELL_DY as i64 * (d - d_min)
+                                - Z_STEP as i64 * i64::from(t.z);
+                            if cx as usize != 2 * cy as usize {
+                                stats.parse_fail += 1; // 非 2:1
+                            } else if sx < 0 || sy < 0 {
+                                // 存储坐标权威但可病态越出走位域(iso.rs 只验
+                                // 1..=w+h−1 包围盒,界内 ≠ 走位格):不落画布
+                                stats.parse_fail += 1;
+                            } else if !blit_diamond(
+                                &mut rgb,
+                                width,
+                                sx as usize,
+                                sy as usize,
+                                cx as usize,
+                                cy as usize,
+                                palette,
+                                slot.diamond_pixels(),
+                            ) {
+                                stats.parse_fail += 1; // 阶梯不闭合
+                            } else {
+                                stats.painted += 1;
                             }
-                        },
-                    }
+                        }
+                    },
                 }
             }
         }
@@ -263,6 +287,123 @@ mod tests {
         assert!(paint_canvas(&pal, 8, 4, &[7u8; 15]).is_none());
     }
 
+    // ===== 走位极值与画布公式 =====
+
+    /// §3.2 伪代码物化回放(测试对拍用):按发射序产出全部 (x,y)。
+    fn walk_cells(w: u16, h: u16) -> Vec<(u16, u16)> {
+        let (cx, cy) = (i64::from(w), i64::from(h));
+        let (mut x_line, mut r_line, mut y) = (cx, cx + 1, 1i64);
+        let mut out = Vec::new();
+        while x_line < r_line {
+            for x in x_line..r_line {
+                out.push((x as u16, y as u16));
+            }
+            x_line += if y < cx { -1 } else { 1 };
+            r_line += if y < cy {
+                1
+            } else if y > cy {
+                -1
+            } else {
+                0
+            };
+            y += 1;
+        }
+        out
+    }
+
+    /// 控制器走位迹钉死:(87,71) d∈[88,229]、x−y∈[−86,86](c1a01md 尺寸);
+    /// 无平台段小图 (1,1)/(2,1)/(1,2);两向不对称 (5,3)/(3,5);物化对拍
+    /// 逐 (w,h) 验发射格数 = 行走容量 (2W−1)·H 且极值一致;300²/4096²
+    /// 不物化直验(i64 数学无溢出)。
+    #[test]
+    fn walk_extremes_trace_and_edges() {
+        assert_eq!(walk_extremes(87, 71), (88, 229, -86, 86));
+        assert_eq!(walk_extremes(1, 1), (2, 2, 0, 0));
+        assert_eq!(walk_extremes(2, 1), (3, 4, -1, 1));
+        assert_eq!(walk_extremes(1, 2), (2, 4, 0, 0));
+        assert_eq!(walk_extremes(5, 3), (6, 11, -4, 4));
+        assert_eq!(walk_extremes(3, 5), (4, 13, -2, 2));
+        for (w, h) in [
+            (1u16, 1u16),
+            (2, 1),
+            (1, 2),
+            (3, 2),
+            (5, 3),
+            (3, 5),
+            (87, 71),
+        ] {
+            let cells = walk_cells(w, h);
+            assert_eq!(
+                cells.len(),
+                (2 * w as usize - 1) * h as usize,
+                "({w},{h}) 发射格 = 行走容量"
+            );
+            let dmin = cells
+                .iter()
+                .map(|(x, y)| i64::from(*x) + i64::from(*y))
+                .min()
+                .unwrap();
+            let dmax = cells
+                .iter()
+                .map(|(x, y)| i64::from(*x) + i64::from(*y))
+                .max()
+                .unwrap();
+            let xmn = cells
+                .iter()
+                .map(|(x, y)| i64::from(*x) - i64::from(*y))
+                .min()
+                .unwrap();
+            let xmx = cells
+                .iter()
+                .map(|(x, y)| i64::from(*x) - i64::from(*y))
+                .max()
+                .unwrap();
+            assert_eq!(walk_extremes(w, h), (dmin, dmax, xmn, xmx), "({w},{h})");
+        }
+        assert_eq!(walk_extremes(300, 300), (301, 900, -299, 299));
+        assert_eq!(walk_extremes(4096, 4096), (4097, 12288, -4095, 4095));
+    }
+
+    /// 画布公式闭合:全走位格在 z ∈ {0, z_max} 的 60×30 菱形包络严格界内,
+    /// 且右/下缘必被某极值格恰贴(W/H 无浪费、blit 无裁切)。
+    #[test]
+    fn canvas_formula_contains_all_walk_cells() {
+        for (w, h) in [
+            (1u16, 1u16),
+            (2, 1),
+            (1, 2),
+            (5, 3),
+            (3, 5),
+            (7, 4),
+            (4, 7),
+            (12, 9),
+        ] {
+            let (d_min, d_max, xmy_min, xmy_max) = walk_extremes(w, h);
+            for z_top in [0i64, 14] {
+                let width = (30 * (xmy_max - xmy_min) + 60) as usize;
+                let height = (15 * (d_max - d_min) + 30 + 15 * z_top) as usize;
+                let mut touched_right = false;
+                let mut touched_bottom = false;
+                for (x, y) in walk_cells(w, h) {
+                    let d = i64::from(x) + i64::from(y);
+                    let xmy = i64::from(x) - i64::from(y);
+                    for z in [0, z_top] {
+                        let sx = (30 * (xmy - xmy_min)) as usize;
+                        let sy = (15 * z_top + 15 * (d - d_min) - 15 * z) as usize;
+                        assert!(sx + 60 <= width, "({w},{h}) zmax={z_top} ({x},{y}) 右溢");
+                        assert!(sy + 30 <= height, "({w},{h}) zmax={z_top} ({x},{y}) 下溢");
+                    }
+                    let sx = (30 * (xmy - xmy_min)) as usize;
+                    let sy = (15 * z_top + 15 * (d - d_min)) as usize; // z=0 贴底
+                    touched_right |= sx + 60 == width;
+                    touched_bottom |= sy + 30 == height;
+                }
+                assert!(touched_right, "({w},{h}) zmax={z_top} 应有格恰贴右缘");
+                assert!(touched_bottom, "({w},{h}) zmax={z_top} 应有格恰贴下缘");
+            }
+        }
+    }
+
     // ===== compose_terrain 夹具(手法同 format/theater.rs 测试)=====
 
     /// flags=0 最小合法 MIX(按名条目)。
@@ -333,35 +474,34 @@ mod tests {
         TheaterIni::parse("[TileSet0000]\nFileName=tst\nTilesInSet=2\n").unwrap()
     }
 
-    /// 画布锚点:2×1 图(ox = 30·(h−1) = 0),(0,0) 格铺在 sx=0/sy=0;
-    /// 菱形行 0 宽 4、x0=(60−4)/2=28 → 画布列 28..31 色 = rgb8(9)。
+    /// 画布锚点:2×1 图只存 (2,1) 一条记录(另两走位格 (1,2)/(2,2) 虚空,
+    /// 不画不计)。走位极值 (3,4,−1,1) → W = 30·2+60 = 120,H = 15·1+30 = 45;
+    /// sx = 30·(1−(−1)) = 60,sy = 0;菱形行 0 宽 4、x0 = 28 → 列 88..91。
     #[test]
     #[allow(clippy::identity_op)] // 9>>4=0 是 6→8 位展开式的合法常量档(值不变)
     fn projection_and_canvas_anchors() {
         let pal = test_palette();
         let assets = tiny_assets(&[("tst01.ubn".to_string(), tmp60(9))]);
         let ini = tiny_ini();
-        // 行主序 y·w+x:(0,0) 有瓦片,(1,0) 无记录
-        let cells = vec![Some(tile(0, 0, 0, 0, 0)), None];
-        let r = compose_terrain(2, 1, &cells, &assets, &ini, "ubn", &pal).unwrap();
-        // W = 30·(2+1) = 90,H = 15·(2+1) + 15·z_max(0) = 45
-        assert_eq!((r.width, r.height), (90, 45));
-        assert_eq!(r.stats.cells, 2);
+        let records = vec![tile(2, 1, 0, 0, 0)];
+        let r = compose_terrain(2, 1, &records, &assets, &ini, "ubn", &pal).unwrap();
+        assert_eq!((r.width, r.height), (120, 45));
+        assert_eq!(r.stats.cells, 1, "cells = 记录口径,缺格不计数");
         assert_eq!(r.stats.painted, 1);
-        assert_eq!(r.stats.no_tile, 1); // 无记录口径并入 no_tile
+        assert_eq!(r.stats.no_tile, 0);
         let px = |x: usize, y: usize| -> [u8; 3] {
             let i = 3 * (y * r.width as usize + x);
             [r.rgb[i], r.rgb[i + 1], r.rgb[i + 2]]
         };
         let c9 = [(9u8 << 2) | (9 >> 4); 3];
-        assert_eq!(px(28, 0), c9, "菱形行 0 首像素(列 28)");
-        assert_eq!(px(31, 0), c9, "菱形行 0 末像素(列 31)");
-        assert_eq!(px(27, 0), [0, 0, 0], "行外 = 背景 0 号色");
+        assert_eq!(px(88, 0), c9, "菱形行 0 首像素(列 88)");
+        assert_eq!(px(91, 0), c9, "菱形行 0 末像素(列 91)");
+        assert_eq!(px(87, 0), [0, 0, 0], "行外 = 背景 0 号色");
         assert_eq!(px(0, 44), [0, 0, 0], "画布末行 = 背景");
     }
 
-    /// z 语义 = 相对画布顶的下沉:高格 (0,0)@z 钉在 sy=0(oy−15z 恰抵消),
-    /// 地面格 (1,0)@z=0 随 oy = 15·z_max 下沉;H 同涨 15·z_max。
+    /// z 语义 = 相对画布顶的下沉:高格 (2,1)@z 钉在 sy=0(z_max 项恰抵消),
+    /// 地面格 (2,2)@z=0 随 z_max 下沉;H 同涨 15·z_max。
     /// z∈{0,1,7,14}:7 含 728 fudge 档,14 = 语料 z 上界。
     #[test]
     #[allow(clippy::identity_op)] // 9>>4=0 是 6→8 位展开式的合法常量档(值不变)
@@ -373,23 +513,21 @@ mod tests {
         ]);
         let ini = tiny_ini();
         for z in [0u8, 1, 7, 14] {
-            let cells = vec![
-                Some(tile(0, 0, 0, 0, z)), // (0,0) d=0 高格
-                Some(tile(1, 0, 1, 0, 0)), // (1,0) d=1 地面格
-            ];
-            let r = compose_terrain(2, 1, &cells, &assets, &ini, "ubn", &pal).unwrap();
-            assert_eq!(r.height as usize, 15 * 3 + 15 * z as usize, "z={z}");
+            // d 升序:(2,1) d=3 远格,(2,2) d=4 近格
+            let records = vec![tile(2, 1, 0, 0, z), tile(2, 2, 1, 0, 0)];
+            let r = compose_terrain(2, 1, &records, &assets, &ini, "ubn", &pal).unwrap();
+            assert_eq!(r.height as usize, 15 * 1 + 30 + 15 * z as usize, "z={z}");
             let w = r.width as usize;
-            // (0,0):sy = oy + 0 − 15·z = 0 恒;行 0 列 28 = rgb8(9)
-            let i = 3 * 28;
+            // (2,1):sx = 30·(1+1) = 60,sy = 15z + 0 − 15z = 0 恒;行 0 列 88
+            let i = 3 * 88;
             assert_eq!(r.rgb[i], (9 << 2) | (9 >> 4), "z={z} 高格钉顶");
-            // (1,0):sx = 30,sy = oy + 15 − 0 = 15·z + 15;行 0 列 58 = rgb8(20)
+            // (2,2):sx = 30·(0+1) = 30,sy = 15z + 15 − 0;行首列 58 = rgb8(20)
             let j = 3 * ((15 * z as usize + 15) * w + 58);
             assert_eq!(r.rgb[j], (20 << 2) | (20 >> 4), "z={z} 地面格下沉 15·z");
         }
     }
 
-    /// 缺环全链各计其数、不中止;七类计数恒等(cells = 和)。
+    /// 缺环全链各计其数、不中止;七类计数恒等(cells = 和,记录口径)。
     #[test]
     fn missing_chain_counts() {
         let pal = test_palette();
@@ -403,20 +541,21 @@ mod tests {
             "[TileSet0000]\nFileName=tst\nTilesInSet=3\n[TileSet0001]\nTilesInSet=1\n",
         )
         .unwrap(); // set0001 无 FileName → 槽 3 = Reserved;全局槽位共 4
-        let cells = vec![
-            Some(tile(0, 0, -1, 0, 0)), // no_tile(tile=-1)
-            Some(tile(1, 0, 0, 0, 0)),  // painted(tst01)
-            Some(tile(0, 1, 1, 0, 0)),  // parse_fail(tst02 敌意)
-            Some(tile(1, 1, 2, 0, 0)),  // missing_file(tst03 未出货)
-            Some(tile(0, 2, 3, 0, 0)),  // reserved(set0001)
-            Some(tile(1, 2, 9, 0, 0)),  // out_of_range(越 4 槽)
-            Some(tile(0, 3, 0, 5, 0)),  // missing_slot(cbx·cby=1,槽 5 空)
-            None,                       // 无记录 → no_tile
+                   // 3×2 图的 7 条记录(d 升序;走位域含 (3,1),(2,2),(1,3),(3,2),…)
+        let records = vec![
+            tile(3, 1, -1, 0, 0), // no_tile(tile=-1)
+            tile(2, 2, 0, 0, 0),  // painted(tst01)
+            tile(1, 3, 3, 0, 0),  // reserved(set0001 占位)
+            tile(3, 2, 1, 0, 0),  // parse_fail(tst02 敌意)
+            tile(2, 3, 9, 0, 0),  // out_of_range(越 4 槽)
+            tile(4, 2, 2, 0, 0),  // missing_file(tst03 未出货)
+            tile(3, 3, 0, 5, 0),  // missing_slot(cbx·cby=1,槽 5 空)
         ];
-        let r = compose_terrain(2, 4, &cells, &assets, &ini, "ubn", &pal).unwrap();
-        assert_eq!(r.stats.cells, 8);
+        let r = compose_terrain(3, 2, &records, &assets, &ini, "ubn", &pal).unwrap();
+        assert_eq!((r.width, r.height), (180, 75)); // 极值 (4,7,−2,2) 口径
+        assert_eq!(r.stats.cells, 7);
         assert_eq!(r.stats.painted, 1);
-        assert_eq!(r.stats.no_tile, 2);
+        assert_eq!(r.stats.no_tile, 1);
         assert_eq!(r.stats.parse_fail, 1);
         assert_eq!(r.stats.missing_file, 1);
         assert_eq!(r.stats.reserved, 1);
@@ -432,27 +571,32 @@ mod tests {
                 + s.reserved
                 + s.out_of_range
                 + s.missing_slot,
-            "七类计数恒等"
+            "七类计数恒等(每记录恰一计数器)"
         );
     }
 
-    /// 4096×4096 敌意图 → 护栏先于分配与遍历拒绝(不触 cells 索引)。
+    /// 4096×4096 敌意图 → 护栏先于分配与遍历拒绝(不触 records 索引):
+    /// 走位极值口径 W = 245,760、H = 122,895 ≈ 30 Gpx;同式合法域
+    /// (87×71 = c1a01md 尺寸,空记录)不拒 → 5220×2145 ≈ 11.2 Mpx < 2²⁷。
     #[test]
     fn hostile_canvas_guard() {
         let pal = test_palette();
         let assets = tiny_assets(&[]);
         let ini = tiny_ini();
-        let cells = vec![None; 64]; // 刻意短于 w·h:护栏必须先于遍历
+        let records: Vec<IsoTile> = Vec::new();
         assert!(matches!(
-            compose_terrain(4096, 4096, &cells, &assets, &ini, "ubn", &pal),
+            compose_terrain(4096, 4096, &records, &assets, &ini, "ubn", &pal),
             Err(FormatError::Invalid(_))
         ));
+        let r = compose_terrain(87, 71, &records, &assets, &ini, "ubn", &pal).unwrap();
+        assert_eq!((r.width, r.height), (5220, 2145));
+        assert_eq!(r.stats.cells, 0);
     }
 
-    /// 行对角线序:等高菱形完美镶嵌无争用,必须用 z 差诱发重叠——远格
-    /// (0,0) z=0 与近格 (1,0) z=1 的 sy 同为 15(oy=15 近格抬升恰抵),
-    /// 行带 r=15 处远格覆盖列 2..57、近格覆盖列 32..87 → 列 32..57 争用,
-    /// 后画的近格(d=1)必须胜;列 20(仅远格覆盖)保留远格色。
+    /// 行对角线序:等高同 d 菱形横距 60 无争用,必须用 z 差诱发重叠——远格
+    /// (2,1) z=0(d=3)与近格 (2,2) z=1(d=4)的 sy 同为 15(z_max=1 项恰抵),
+    /// 行带 r=15 处远格覆盖列 62..117、近格覆盖列 32..87 → 列 62..87 争用,
+    /// 后画的近格(d=4)必须胜;列 100(仅远格覆盖)保留远格色。
     #[test]
     fn diagonal_painters_order() {
         let pal = test_palette();
@@ -461,21 +605,64 @@ mod tests {
             ("tst02.ubn".to_string(), tmp60(30)),
         ]);
         let ini = tiny_ini();
-        let cells = vec![
-            Some(tile(0, 0, 0, 0, 0)), // (0,0) d=0 远格 z=0(色 1)
-            Some(tile(1, 0, 1, 0, 1)), // (1,0) d=1 近格 z=1(色 30)
+        let records = vec![
+            tile(2, 1, 0, 0, 0), // (2,1) d=3 远格 z=0(色 1)
+            tile(2, 2, 1, 0, 1), // (2,2) d=4 近格 z=1(色 30)
         ];
-        let r = compose_terrain(2, 1, &cells, &assets, &ini, "ubn", &pal).unwrap();
-        // W=90,H = 15·3+15·1 = 60;两格 sy 均 = 15,行 15..44
+        let r = compose_terrain(2, 1, &records, &assets, &ini, "ubn", &pal).unwrap();
+        // W=120,H = 15·1+30+15·1 = 60;两格 sy 均 = 15,行 15..44
         assert_eq!(r.height as usize, 60);
         let w = r.width as usize;
-        // 争用带像素(行 30 = 两菱形 r=15,列 40):近平后画胜 → rgb8(30)
-        let i = 3 * (30 * w + 40);
+        // 争用带像素(行 30 = 两菱形 r=15,列 70):近平后画胜 → rgb8(30)
+        let i = 3 * (30 * w + 70);
         assert_eq!(r.rgb[i], (30 << 2) | (30 >> 4), "争用带近格后画胜");
-        // 远格专属区(行 20 = 远格 r=5 覆盖 18..41,近格 r=5 覆盖 48..71):
-        // 列 20 保留远格色 rgb8(1)
-        let j = 3 * (20 * w + 20);
+        // 远格专属区(行 30 = 远格 r=15 覆盖 62..117,近格 r=15 覆盖 32..87):
+        // 列 100 保留远格色 rgb8(1)
+        let j = 3 * (30 * w + 100);
         let c = 1u8; // rgb8(1) 经变量计算,字面量 1>>4=0 会触发 clippy identity_op
         assert_eq!(r.rgb[j], (c << 2) | (c >> 4), "远格专属区不被覆写");
+    }
+
+    /// 全菱形覆盖(3×2 图 = (2·3−1)·2 = 10 记录全存、全可绘):每格恰落画,
+    /// 菱形行 0 采样点两两不同(后画格最低下移 15 行,永不覆写先画格行 0)
+    /// 且全为瓦片色;cells = 10 = 记录口径。
+    #[test]
+    fn full_diamond_paint_3x2() {
+        let pal = test_palette();
+        let assets = tiny_assets(&[("tst01.ubn".to_string(), tmp60(9))]);
+        let ini = tiny_ini();
+        let mut records: Vec<IsoTile> = walk_cells(3, 2)
+            .into_iter()
+            .map(|(x, y)| tile(x, y, 0, 0, 0))
+            .collect();
+        records.sort_by_key(|t| u32::from(t.x) + u32::from(t.y));
+        assert_eq!(records.len(), (2 * 3 - 1) * 2);
+        let r = compose_terrain(3, 2, &records, &assets, &ini, "ubn", &pal).unwrap();
+        let (d_min, _, xmy_min, _) = walk_extremes(3, 2);
+        assert_eq!((r.width, r.height), (180, 75));
+        assert_eq!(r.stats.cells, 10);
+        assert_eq!(r.stats.painted, 10);
+        assert_eq!(r.stats.no_tile + r.stats.parse_fail, 0);
+        let v = 9u8; // rgb8(9) 经变量计算,字面量 9>>4=0 会触发 clippy identity_op
+        let c9 = [(v << 2) | (v >> 4); 3];
+        let mut samples = std::collections::BTreeSet::new();
+        for t in &records {
+            let sx = (30 * (i64::from(t.x) - i64::from(t.y) - xmy_min)) as usize;
+            let sy = (15 * (i64::from(t.x) + i64::from(t.y) - d_min)) as usize;
+            let i = 3 * (sy * r.width as usize + sx + 28);
+            assert_eq!(
+                [r.rgb[i], r.rgb[i + 1], r.rgb[i + 2]],
+                c9,
+                "({},{}) 菱形行 0 未落瓦片色",
+                t.x,
+                t.y
+            );
+            assert!(
+                samples.insert((sx + 28, sy)),
+                "({},{}) 采样点与他格重合",
+                t.x,
+                t.y
+            );
+        }
     }
 }

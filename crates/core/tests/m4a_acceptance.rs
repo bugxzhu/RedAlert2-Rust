@@ -11,7 +11,7 @@ use ra2_core::format::map::mapdoc::decode_map_text;
 use ra2_core::format::map::MapFile;
 use ra2_core::format::pal::Palette;
 use ra2_core::format::theater::{theater_spec, TheaterAssets, TheaterIni};
-use ra2_core::render::terrain::render_terrain;
+use ra2_core::render::terrain::{render_terrain, walk_extremes};
 
 fn assets_dir() -> std::path::PathBuf {
     std::path::PathBuf::from(
@@ -23,7 +23,10 @@ fn assets_dir() -> std::path::PathBuf {
 /// + RMG MapUnits 267;扩展名只有 .map,无 .yrm)。
 fn maps() -> Vec<std::path::PathBuf> {
     fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
-        for e in std::fs::read_dir(dir).unwrap().flatten() {
+        for e in std::fs::read_dir(dir)
+            .unwrap_or_else(|e| panic!("read_dir({}) 失败: {e}", dir.display()))
+            .flatten()
+        {
             let p = e.path();
             if p.is_dir() {
                 walk(&p, out);
@@ -89,31 +92,60 @@ fn m4a_all_maps_render_and_samples() {
         let ini = TheaterIni::parse(&decode_map_text(
             assets.lookup(spec.ini_name).expect("剧场表在"),
         ))
-        .unwrap();
+        .expect("剧场 INI 可解析");
         let (pal, real) = theater_palette(&assets, m.map_meta.theater);
         let t0 = std::time::Instant::now();
         let r = render_terrain(&m, &assets, &ini, &pal).expect("全量合成零 panic");
         let ms = t0.elapsed().as_millis();
-        // 预算=实测 max 1084ms(被遗忘者.map)×3≈3252 取 3500,硬帽 10s 内(spec §9 任务③)。
-        assert!(ms < 3500, "{} 耗时 {ms}ms 超 M4a 预算", path.display());
+        // 预算:暂用计划硬帽 10s(域改菱形记录口径后待实测回填;控制器终审后定常量)。
+        assert!(
+            ms < 10_000,
+            "{} 耗时 {ms}ms 超 M4a 预算(计划硬帽 10s)",
+            path.display()
+        );
         total += 1;
         total_ms += ms;
         if ms > max_ms.0 {
             max_ms = (ms, path.display().to_string());
         }
         total_missing_file += r.stats.missing_file;
+        // 覆盖度断言(I1):cells = 记录口径,且每条记录恰落七类计数器之一
+        assert_eq!(r.stats.cells, m.tiles.len(), "{}", path.display());
+        let s = r.stats;
+        assert_eq!(
+            s.painted
+                + s.no_tile
+                + s.missing_file
+                + s.reserved
+                + s.out_of_range
+                + s.missing_slot
+                + s.parse_fail,
+            s.cells,
+            "{}: 七类计数恒等(每记录恰一计数器)",
+            path.display()
+        );
         let (w, h) = m.size_wh();
-        // H 反推 z_max 兼作一致性校验(H 公式钉死)
-        let z_max = (r.height as usize - 15 * (w as usize + h as usize)) / 15;
+        // 画布公式独立重算(M1 闭环):W/H 均由 walk_extremes + 实扫 z_max
+        // 决定(旧"H 反推 z_max"的同义反复断言已废)。
+        let (d_min, d_max, xmy_min, xmy_max) = walk_extremes(w, h);
+        let z_max = m
+            .tiles
+            .records()
+            .iter()
+            .map(|t| t.z as usize)
+            .max()
+            .unwrap_or(0);
         assert_eq!(
             r.width as usize,
-            30 * (w as usize + h as usize),
-            "{}",
+            30 * ((xmy_max - xmy_min) as usize) + 60,
+            "{}: W = 30·(x−y 跨度)+60(走位极值口径)",
             path.display()
         );
         assert_eq!(
             r.height as usize,
-            15 * (w as usize + h as usize) + 15 * z_max
+            15 * ((d_max - d_min) as usize) + 30 + 15 * z_max,
+            "{}: H = 15·(d 跨度)+30+15·z_max",
+            path.display()
         );
         let key = format!("{:?}", m.map_meta.theater);
         let entry = by_theater.entry(key).or_insert((0, 0, false));

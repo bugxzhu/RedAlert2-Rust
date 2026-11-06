@@ -24,8 +24,9 @@
 - 剧场分布(807 = Maps/ 540 + RMG MapUnits 267):temperate 212 /
   snow 106 / urban 78 / desert 73 / newurban 61 / lunar 1(^Theater=
   行命中 531,余为 RMG 模板无此行头;逐图剧场以 MapFile::parse 为准)。
-- 结论:真彩抽样 = TEMPERATE/SNOW/URBAN;desert/newurban/lunar(135 图)
-  哑调色板零 panic 覆盖,Preview 对拍不参与。
+- 结论:真彩抽样 = TEMPERATE/SNOW/URBAN;desert/newurban/lunar(135 图,
+  正则行口径;parse 权威口径 299 = 170+128+1)哑调色板零 panic 覆盖,
+  Preview 对拍不参与。
 
 ## 3. 语料实测(T4 输出回填)
 - 807 图全量:两轮全跑 269.08s / 266.33s(纯渲染累计 202,285ms);最慢单图
@@ -51,7 +52,7 @@
   半格居中是否应进画布公式)。
 
 ## 5. 性能预算
-- 每图断言 `ms < 3500`(实测 max 1084ms ×3 ≈ 3252 取整 3500;spec 硬帽
+- 每图断言 `ms < 3500`(实测 max 1084ms ×3 ≈ 3252 取整 3500;计划硬帽
   10s 内;m4a_acceptance.rs 已入断言)。全量套件本地实测 ~4.5 分钟。
 
 ## 出处

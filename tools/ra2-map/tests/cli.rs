@@ -255,14 +255,21 @@ fn render_needs_assets_exit_1() {
     let dir = temp_dir("render-noassets");
     let p = dir.join("t.map");
     std::fs::write(&p, mini_map()).unwrap();
+    let out_path = dir.join("x.png"); // 独立临时路径:断言失败后不落盘(残余 5)
     let out = Command::new(bin())
-        .args(["render", p.to_str().unwrap(), "-o", "x.png"])
+        .args([
+            "render",
+            p.to_str().unwrap(),
+            "-o",
+            out_path.to_str().unwrap(),
+        ])
         .env_remove("RA2_ASSETS_DIR")
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("RA2_ASSETS_DIR"), "{stderr}");
+    assert!(!out_path.exists(), "失败路径不得产出文件");
 }
 
 /// 解码 png.rs 的单 IDAT(zlib store)→ 原始扫描行(每行 1 过滤字节 + 3·w)。
@@ -405,4 +412,61 @@ fn real_maps_extract_tile_three_theaters() {
             "{rel}: {stdout}"
         );
     }
+}
+
+/// render 成功路径活体(需 RA2_ASSETS_DIR;补 I2 成功路径缺口):TEMPERATE
+/// 一图渲染到临时 PNG,退出 0、文件非空、IHDR 尺寸 == 走位极值画布公式
+/// (30·(x−y 跨度)+60 × 15·(d 跨度)+30+15·z_max,walk_extremes 独立重算)。
+#[test]
+#[ignore]
+fn real_map_render_outputs_png() {
+    use ra2_core::format::map::MapFile;
+    use ra2_core::render::terrain::walk_extremes;
+    let assets = std::env::var("RA2_ASSETS_DIR").expect("需要 RA2_ASSETS_DIR");
+    let map_path = std::path::Path::new(&assets).join("Maps/Cooperative/c1a01md.map");
+    let data = std::fs::read(&map_path).unwrap();
+    let m = MapFile::parse(&data).unwrap();
+    let (w, h) = m.size_wh();
+    let (d_min, d_max, xmy_min, xmy_max) = walk_extremes(w, h);
+    let z_max = m
+        .tiles
+        .records()
+        .iter()
+        .map(|t| t.z as usize)
+        .max()
+        .unwrap_or(0);
+    let expect_w = (30 * (xmy_max - xmy_min) + 60) as u32;
+    let expect_h = (15 * (d_max - d_min) + 30 + 15 * z_max as i64) as u32;
+    let dir = temp_dir("real-render");
+    let out_path = dir.join("terrain.png");
+    let out = Command::new(bin())
+        .args([
+            "render",
+            map_path.to_str().unwrap(),
+            "-o",
+            out_path.to_str().unwrap(),
+        ])
+        .env("RA2_ASSETS_DIR", &assets)
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let png = std::fs::read(&out_path).expect("PNG 落盘");
+    assert!(png.len() > 24, "PNG 非空");
+    assert_eq!(png[..8], *b"\x89PNG\r\n\x1a\n", "PNG 签名");
+    assert_eq!(png[12..16], *b"IHDR");
+    assert_eq!(
+        png[16..20],
+        expect_w.to_be_bytes(),
+        "IHDR 宽 = 走位极值口径"
+    );
+    assert_eq!(
+        png[20..24],
+        expect_h.to_be_bytes(),
+        "IHDR 高 = 走位极值 + 实扫 z_max"
+    );
 }

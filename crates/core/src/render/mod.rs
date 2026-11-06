@@ -6,8 +6,9 @@
 
 pub mod terrain;
 
-/// 敌意画布上界(spec §5):语料最大 272+158=430 格 → 12,900×6,450
-/// ≈ 83.2 Mpx,护栏 2²⁷ 给 1.6× 余量;4096² 敌意图(约 30 Gpx)拒绝。
+/// 敌意画布上界(spec §5):走位极值画布口径,语料最大 [Map]Size 对角 430
+/// (272×158)→ 16,320×4,965 ≈ 81 Mpx、方图上限 ≈ 86 Mpx,护栏 2²⁷ 给
+/// ≥1.5× 余量;4096² 敌意图(约 30 Gpx)拒绝。
 pub const MAX_RENDER_PIXELS: u64 = 134_217_728;
 
 /// 等距格像素常数(geometry.h:11-12 ISO_TILE_PIXEL_W/H)。
@@ -21,12 +22,15 @@ pub const CELL_DY: usize = 15;
 /// z∈0..14 全档含 728 fudge 精确等于 15·z)。
 pub const Z_STEP: usize = 15;
 
-/// 整图渲染统计(spec §5:瓦片链任一环缺不中止,按格计数)。
+/// 整图渲染统计(spec §5:瓦片链任一环缺不中止)。语义(M4a 终审重裁定):
+/// 记录口径——cells 为 records().len(),每条记录恰落七类计数器之一
+/// (恒等式 cells = 其和);走位缺格 = 虚空,不画不计(旧 w×h 矩形域的
+/// "界内无记录"计数含义随域改废除)。
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct RenderStats {
-    /// 遍历格数(w×h 全量,含无记录格)。
+    /// 记录总数(tiles.records().len(),含 tile=−1)。
     pub cells: usize,
-    /// 无瓦片格(tile=-1)或无记录。
+    /// 无瓦片记录(tile=−1,斜坡边格)。
     pub no_tile: usize,
     /// 成功落像素。
     pub painted: usize,
@@ -38,7 +42,7 @@ pub struct RenderStats {
     pub out_of_range: usize,
     /// TMP 槽空(sub_tile 越界/空槽)。
     pub missing_slot: usize,
-    /// TMP 解析失败或病态画布(非 2:1/阶梯不闭合)。
+    /// TMP 解析失败、病态画布(非 2:1/阶梯不闭合)或记录越出走位域。
     pub parse_fail: usize,
 }
 
