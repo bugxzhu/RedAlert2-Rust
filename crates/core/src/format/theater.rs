@@ -7,6 +7,13 @@
 //! (2026-11-05 控制器,Init_Secondary_Mixes 0x5301A0 / MixFile find
 //! 0x5B4430 / Theater::Array VA 0x7E1B78):挂载序首中即胜、顺序探查、
 //! LastTilesInSet 引擎规则、.ubn 扩展名与六份 md INI 名互证。
+//!
+//! 裁定补遗(2026-11-06,ra2-decomp isotype.cpp:695-708 + gamemd .data
+//! 剧场记录表 0x3E1B80..0x3E1E80):缺 TilesInSet 键 = Get_Int 默认 −1
+//! = 停探查(与缺段同线);LastTilesInSet ≠ TilesInSet 为瓦片插入重映射
+//! 指令(Count/Offset 簿记,tile_count += last),−1 视为无;NewUrban 的
+//! 挂载 token 为 URBANN(0x3E1D68)→ urbann.mix 属引擎挂载面(短 ISO token
+//! ISOTEM/ISOSNO 系 DOS 8.3 限长所致)。
 
 use crate::format::crc::mix_name_id;
 use crate::format::ini::{parse_int_prefix, IniDocument};
@@ -105,19 +112,32 @@ impl TheaterIni {
         let mut ordinal = 0usize;
         loop {
             let sec = format!("TileSet{ordinal:04}");
-            let Some(section) = doc.section(&sec) else {
+            if doc.section(&sec).is_none() {
                 break; // 首个缺失段即停(REA 勘误:引擎顺序探查)
+            }
+            // 引擎 Get_Int(section,"TilesInSet",-1):缺键或字面 −1 → 停探查
+            // (isotype.cpp:695-698);键在值脏 → atoi 0 → 继续。我们的
+            // IniDocument::get_int 会把"值脏"也归默认值,故此处必须用
+            // value()+parse_int_prefix 直写,以区分两条路径。
+            let Some(tiles_str) = doc.value(&sec, "TilesInSet") else {
+                break; // 缺键 = Get_Int 默认 −1 = 与缺段同线停
             };
-            let _ = section;
-            let tiles_raw = doc.get_int(&sec, "TilesInSet", 0);
+            let tiles_raw = parse_int_prefix(tiles_str).unwrap_or(0); // 引擎 atoi:键在值脏 → 0
+            if tiles_raw == -1 {
+                break; // 字面 −1(含 "-1x" 等 atoi 前缀)同线停
+            }
+            // 引擎直加原值(可为负倒退/超 99);此处夹紧为有意偏差:
+            // 敌意输入护栏,语料实测全 0..99,该分支语料死路。
             let tiles = tiles_raw.clamp(0, 99) as usize;
             if let Some(lts_raw) = doc.value(&sec, "LastTilesInSet") {
-                // 引擎按 LastTilesInSet 推进索引并映射 extras(REA 勘误);
-                // 全语料零出现(依据 §3),死路不实现 → Unsupported
+                // 引擎语义:LastTilesInSet ≠ TilesInSet = 瓦片插入重映射指令
+                // (Count=tile_count+last,Offset=tiles−last,tile_count+=last;
+                // isotype.cpp:700-708),非数据错误;−1(含 Get_Int 缺省路径)
+                // 视为无。重映射未实现 → Unsupported 守卫,全语料零出现。
                 let lts = parse_int_prefix(lts_raw).unwrap_or(0);
-                if lts != tiles_raw {
+                if lts != -1 && lts != tiles_raw {
                     return Err(FormatError::Unsupported(format!(
-                        "{sec}: LastTilesInSet={lts_raw} != TilesInSet={tiles_raw}(引擎规则未实现,研究 §3)"
+                        "{sec}: LastTilesInSet={lts_raw} != TilesInSet={tiles_str}(瓦片插入重映射未实现,isotype.cpp:700-708)"
                     )));
                 }
             }
@@ -185,7 +205,12 @@ const MAX_DEPTH: usize = 3;
 
 /// 每剧场 mix 名单(研究表 1 语料观测;挂载序在 ecache/elocal 之后,
 /// 列表内顺序仅为确定性)。localmd.mix/local.mix 的拦截名另有专位。
-const THEATER_MIX_NAMES: [&str; 19] = [
+/// urbann.mix(2026-11-06 裁定复位):gamemd .data 剧场记录表
+/// 0x3E1B80..0x3E1E80 的 NEWURBAN 记录挂载 token = URBANN(0x3E1D68),
+/// 即引擎会拼出 urbann.mix 并在语料 ra2md 内命中(实测 2,692,234 B 嵌套);
+/// urbannmd.mix 为 md 侧运行时拼接名(URBANN+"md"),语料缺货 = 无害占位,
+/// 保留。短 ISO token(ISOTEM/ISOSNO/ISOUBN)系 DOS 8.3 限长。
+const THEATER_MIX_NAMES: [&str; 20] = [
     "isogen.mix",
     "isotemp.mix",
     "isosnow.mix",
@@ -196,6 +221,7 @@ const THEATER_MIX_NAMES: [&str; 19] = [
     "isodes.mix",
     "isolun.mix",
     "isoubn.mix",
+    "urbann.mix",
     "urbannmd.mix",
     "isogenmd.mix",
     "isotemmd.mix",
@@ -475,8 +501,9 @@ mod tests {
 
     #[test]
     fn atoi_prefix_and_clamp() {
-        // 出厂脏数据 TilesInSet=o → 0(研究 §3,localmd urbannmd set0105 实测);
-        // >99 截 99(语料无,规则照研究);负值钳 0
+        // 键在值脏(TilesInSet=o → atoi 0)→ 继续不吹(引擎 Get_Int 只在
+        // 缺键/−1 时停,isotype.cpp:695-698;localmd urbannmd set0105 实测);
+        // 夹紧为有意偏差:引擎直加原值(150/−3 均原样入账),语料全 0..99 死路
         let t = ini("[TileSet0000]\nFileName=a\nTilesInSet=o\n\
              [TileSet0001]\nFileName=b\nTilesInSet=12x\n\
              [TileSet0002]\nFileName=c\nTilesInSet=150\n\
@@ -523,11 +550,12 @@ mod tests {
 
     #[test]
     fn set_of_returns_info() {
-        // 顺序探测语义下 0081 单段不可达(0000 缺即停)——用 81 个无键占位段
-        // 铺满 0000..0080(零贡献,同 missing_keys 路径),set0081 first_index=0
+        // 顺序探测语义下 0081 单段不可达(0000 缺即停)——用 81 个零贡献段
+        // 铺满 0000..0080(须带 TilesInSet=0:缺键即停,引擎 Get_Int −1 语义),
+        // set0081 first_index=0
         let mut text = String::new();
         for i in 0..81 {
-            text.push_str(&format!("[TileSet{i:04}]\n"));
+            text.push_str(&format!("[TileSet{i:04}]\nTilesInSet=0\n"));
         }
         text.push_str("[TileSet0081]\nName=USS Arizona\nFileName=ariz\nTilesInSet=1\n");
         let t = ini(&text);
@@ -549,23 +577,36 @@ mod tests {
     }
 
     #[test]
-    fn missing_keys_lenient() {
-        // 缺 FileName/TilesInSet → 空集 0 贡献、探查继续(spec §5 宽容)
+    fn missing_tiles_in_set_stops_probe() {
+        // 引擎 Get_Int(section,"TilesInSet",-1):缺键 → −1 → 停探查
+        // (isotype.cpp:695-698),与缺段同线;TileSet0001 不参与
         let t = ini("[TileSet0000]\nName=Ghost\n\
              [TileSet0001]\nFileName=bbb\nTilesInSet=2\n");
-        assert_eq!(t.slot_count(), 2);
-        assert_eq!(t.set_of(0).unwrap().number, 1);
+        assert_eq!(t.slot_count(), 0);
+        assert!(t.set_of(0).is_none());
+        // 字面 −1(及 atoi 前缀 "-1x")同线停
+        for raw in ["-1", "-1x"] {
+            let t = ini(&format!(
+                "[TileSet0000]\nFileName=a\nTilesInSet={raw}\n\
+             [TileSet0001]\nFileName=b\nTilesInSet=2\n"
+            ));
+            assert_eq!(t.slot_count(), 0, "TilesInSet={raw} 应停探查");
+        }
     }
 
     #[test]
     fn last_tiles_in_set_mismatch_is_unsupported() {
-        // REA 勘误引擎规则:LastTilesInSet != TilesInSet → Unsupported(死路)
+        // 引擎语义:LastTilesInSet != TilesInSet = 瓦片插入重映射指令
+        // (Count=tile_count+last,Offset=tiles−last,isotype.cpp:700-708),
+        // 非数据错误;重映射未实现 → Unsupported 守卫
         let bad = TheaterIni::parse("[TileSet0000]\nFileName=a\nTilesInSet=3\nLastTilesInSet=5\n")
             .unwrap_err();
         assert!(matches!(bad, FormatError::Unsupported(_)));
-        // 值相等或缺失 → 正常
+        // 值相等、缺失、或 −1(Get_Int 默认语义,视为无)→ 正常
         let ok = ini("[TileSet0000]\nFileName=a\nTilesInSet=3\nLastTilesInSet=3\n");
         assert_eq!(ok.slot_count(), 3);
+        let neg = ini("[TileSet0000]\nFileName=a\nTilesInSet=3\nLastTilesInSet=-1\n");
+        assert_eq!(neg.slot_count(), 3);
     }
 
     #[test]

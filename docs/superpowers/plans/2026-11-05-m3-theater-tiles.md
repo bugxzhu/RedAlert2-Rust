@@ -1342,6 +1342,12 @@ impl TheaterIni {
                 break; // 首个缺失段即停(REA 勘误:引擎顺序探查)
             };
             let _ = section;
+            // 勘误(裁决落定,2026-11-06,isotype.cpp:695-708):草图 get_int(...,0)
+            // 宽容缺键续探与引擎不符——引擎 Get_Int 默认 −1,缺键或字面 −1 即停;
+            // 键在值脏 → atoi 0 续。实现改 value()+parse_int_prefix 直写两径
+            // (我们的 get_int 会把值脏也归默认,无法区分两径)。LastTilesInSet
+            // ≠ TilesInSet = 瓦片插入重映射指令(Count/Offset 簿记)非错误,
+            // Unsupported 改注"未实现特性";字面 −1 视为无。研究 §9.1。
             let tiles_raw = doc.get_int(&sec, "TilesInSet", 0);
             let tiles = tiles_raw.clamp(0, 99) as usize;
             if let Some(lts_raw) = doc.value(&sec, "LastTilesInSet") {
@@ -1699,6 +1705,10 @@ const THEATER_MIX_NAMES: [&str; 19] = [
 // 装载序模拟探针及闭链全绿一致——但此替换当时未经裁定记录,属流程缺口(终审 #9 前提勘正:
 // 并非"漏列 18 名不可编译",而是"换名")。urbann.mix(ra2md 嵌套,研究 §1)是否入拦截名单
 // 列为裁决队列。
+// 裁决落定(2026-11-06,feat/m3-adjudications):urbann.mix 复位入名单(引擎剧场记录表
+// URBANN token 0x3E1D68 + 语料实存 2,692,234 B),urbannmd.mix 保留(引擎可构造名,缺货
+// 占位)→ 名单 19→20;缺 TilesInSet 键 = 停探查、LastTilesInSet 字面 −1 = 视为无
+// (isotype.cpp:695-708),详见研究 §9.1 裁决队列块。回归:383/origin-tally 不动。
 
 /// 一个已挂载容器(数据 + 解析后的索引表)。
 struct Mounted {

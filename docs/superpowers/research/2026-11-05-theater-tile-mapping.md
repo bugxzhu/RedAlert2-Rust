@@ -336,6 +336,28 @@ mask(0x3E2B5C、0x3EC4C8;30 行×60B;0x20 透明/0xDB 不透明;run 居中连续
 裁定 extract-tile 采此式(§4 勘误),A 族公式作废;与 Get_Tile_Image 雷达
 mask(48×24 同族构造)互证。
 
+**裁决队列三项落定(2026-11-06,feat/m3-adjudications,上条预验与实现弥合)**:
+- **② 缺键停探**:isotype.cpp:695-698 `Get_Int(section,"TilesInSet",-1)
+  == -1 → break`——缺键与缺段同线停;键在值脏(`o`)→ atoi 0 → 继。
+  T4 实现误用 `get_int(...,0)` 宽容续探,且我们的 `IniDocument::get_int`
+  会把"值脏"也归默认值(与引擎 atoi 0 不同径),故实现改用
+  `value()+parse_int_prefix` 直写两径。六剧场真 INI 容量断言(838/1081/
+  964/726/1189/198)在新语义下全绿 = 全语料无缺键/−1 中断,两径均语料
+  死路但引擎对齐。
+- **③ LastTilesInSet 字面 −1**:isotype.cpp:700-708 完整语义 =
+  `last==-1 或 ==tiles → 平加`;否则记 `TileInsertType{Count=计数+last,
+  Offset=tiles−last}` 且计数 += last——**瓦片插入重映射指令,非数据错误**。
+  Unsupported 守卫改注"未实现引擎特性";−1 视为无(引擎 Get_Int 缺省径)。
+- **① urbann.mix 复位拦截名单**:gamemd .data 剧场记录表
+  0x3E1B80..0x3E1E80(per-剧场 显示名+基础 token+ISO token×2)NEWURBAN
+  记录 = 'NEWURBAN'/'Name:New Urban'/**URBANN(0x3E1D68)**/ISOUBN
+  (0x3E1D72);短 ISO token(ISOTEM/ISOSNO/ISOUBN)系 DOS 8.3 限长
+  (isosnowmd 9 字符超限 → ISOSNOMD)。md 名运行时拼接,无 urbannmd 字面。
+  语料探查(verify6.py):**urbann.mix 实存 ra2md 内(2,692,234 B 嵌套);
+  urbannmd.mix 全树不存在**(无害占位,引擎可构造名)。名单 19→20,
+  urbann.mix 复位草图第 11 位。回归验证:NEWURBAN 缺档 383 与 snow
+  origin-tally(459/323/88/16)均不动 = 缺槽确系未出货占位,非挂载遗漏。
+
 ## 10. 出处
 
 - 控制器裁决探针(五轮,可复跑):`%TEMP%\m3verify\verify.py`(INI 容量/锚点/
