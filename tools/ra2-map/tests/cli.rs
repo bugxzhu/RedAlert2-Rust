@@ -236,6 +236,35 @@ fn extract_tile_without_assets_exits_1() {
     assert!(!out_path.exists());
 }
 
+// 用法错:render 缺 -o → 退出 2(usage 裁决先于文件 IO)
+#[test]
+fn render_usage_errors_exit_2() {
+    let out = Command::new(bin())
+        .args(["render", "whatever.map"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+}
+
+// 缺资产目录(无 --assets 且 RA2_ASSETS_DIR 清空)→ 退出 1 且 stderr 提示。
+// 偏差记录:brief 原文用不存在的 "whatever.map"——run_render 先读文件后查
+// 资产,读失败同样退出 1 但 stderr 不含 RA2_ASSETS_DIR,第二断言必挂;改用
+// 合成 mini_map 走到资产分支(与 extract_tile_without_assets_exits_1 同手法)。
+#[test]
+fn render_needs_assets_exit_1() {
+    let dir = temp_dir("render-noassets");
+    let p = dir.join("t.map");
+    std::fs::write(&p, mini_map()).unwrap();
+    let out = Command::new(bin())
+        .args(["render", p.to_str().unwrap(), "-o", "x.png"])
+        .env_remove("RA2_ASSETS_DIR")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("RA2_ASSETS_DIR"), "{stderr}");
+}
+
 /// 解码 png.rs 的单 IDAT(zlib store)→ 原始扫描行(每行 1 过滤字节 + 3·w)。
 fn decode_store_idat(png: &[u8]) -> Vec<u8> {
     let mut pos = 8usize;

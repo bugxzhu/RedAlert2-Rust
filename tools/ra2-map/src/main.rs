@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! ra2-map:地图解析命令行工具(info / extract-tile)。
+//! ra2-map:地图解析命令行工具(info / extract-tile / render)。
 //!
 //! 退出码契约与 ra2-mix 相同:0 成功;1 找不到文件/解析失败/写失败/资源
 //! 缺失;2 用法错误(含非 UTF-8 参数、坐标非整数)。usage 裁决先于任何
@@ -23,6 +23,9 @@ mod png;
 fn usage() -> ! {
     eprintln!("用法: ra2-map info <file.map>");
     eprintln!("      ra2-map extract-tile <file.map> <x> <y> -o <file.png> [--assets <游戏目录>]");
+    eprintln!(
+        "      ra2-map render <map.map> -o <out.png> [--assets <dir>]   整幅地形渲染 PNG(spec M4a)"
+    );
     eprintln!("说明: extract-tile 输出该格真瓦片位图(剧场 INI 反查 → TS TMP 槽位 →");
     eprintln!("      60×30 等距菱形 → 剧场调色板上色;行外区为调色板 0 号色)。");
     eprintln!("      缺 [--assets] 时取环境变量 RA2_ASSETS_DIR。DESERT/NEWURBAN/LUNAR");
@@ -126,6 +129,93 @@ fn load_theater_palette(assets: &TheaterAssets, theater: Theater) -> Result<Pale
         format!("{name} 在本机安装缺席(DESERT/NEWURBAN/LUNAR 的 YR 调色板;活体验收用 TEMPERATE/SNOW/URBAN)")
     })?;
     Palette::parse(pal).map_err(|e| format!("调色板 768B 校验失败: {e}"))
+}
+
+/// 整幅地形渲染(M4a T3):装载链复用 extract-tile(读图→解析→资产→调色板
+/// →剧场表),合成委托 `core::render::terrain::render_terrain`,PNG 落盘,
+/// 五类缺环统计入 stderr。
+fn run_render(map_path: &str, out_path: &str, assets_opt: Option<&str>) -> ExitCode {
+    let data = match std::fs::read(map_path) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("读取 {map_path} 失败: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    let m = match MapFile::parse(&data) {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("解析失败: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    let assets_dir = assets_opt.map(std::path::PathBuf::from).or_else(|| {
+        std::env::var("RA2_ASSETS_DIR")
+            .ok()
+            .map(std::path::PathBuf::from)
+    });
+    let Some(assets_dir) = assets_dir else {
+        eprintln!("需要 --assets 或环境变量 RA2_ASSETS_DIR 指向游戏目录");
+        return ExitCode::from(1);
+    };
+    let spec = theater_spec(m.map_meta.theater);
+    let assets = match TheaterAssets::open(&assets_dir) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("资产装载失败: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    let palette = match load_theater_palette(&assets, m.map_meta.theater) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("剧场调色板解析失败: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    let ini_bytes = match assets.lookup(spec.ini_name) {
+        Some(b) => b,
+        None => {
+            eprintln!("资产缺剧场表 {}", spec.ini_name);
+            return ExitCode::from(1);
+        }
+    };
+    let ini = match TheaterIni::parse(&decode_map_text(ini_bytes)) {
+        Ok(i) => i,
+        Err(e) => {
+            eprintln!("解析 {}: {e}", spec.ini_name);
+            return ExitCode::from(1);
+        }
+    };
+    let t0 = std::time::Instant::now();
+    let r = match ra2_core::render::terrain::render_terrain(&m, &assets, &ini, &palette) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("合成失败: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    let dt = t0.elapsed();
+    if let Err(e) = png::write_png_file(std::path::Path::new(out_path), r.width, r.height, &r.rgb) {
+        eprintln!("写 {out_path} 失败: {e}");
+        return ExitCode::from(1);
+    }
+    let s = r.stats;
+    eprintln!(
+        "已写 {out_path}: {}×{}px | 格 {} = 落绘 {} + 无瓦片 {} + 缺文件 {} + 保留槽 {} + 越界 {} + 空槽 {} + 解析败 {} | 剧场 {:?} | 耗时 {dt:?}",
+        r.width,
+        r.height,
+        s.cells,
+        s.painted,
+        s.no_tile,
+        s.missing_file,
+        s.reserved,
+        s.out_of_range,
+        s.missing_slot,
+        s.parse_fail,
+        m.map_meta.theater,
+    );
+    ExitCode::SUCCESS
 }
 
 fn run_extract_tile(
@@ -312,9 +402,22 @@ fn main() -> ExitCode {
             out: &'a str,
             assets: Option<&'a str>,
         },
+        Render {
+            map: &'a str,
+            out: &'a str,
+            assets: Option<&'a str>,
+        },
     }
     let action = match argv.as_slice() {
         ["info", map] => Action::Info(map),
+        ["render", map, flag, out, rest @ ..] if *flag == "-o" => {
+            let assets = match rest {
+                [] => None,
+                ["--assets", dir] => Some(*dir),
+                _ => usage(),
+            };
+            Action::Render { map, out, assets }
+        }
         ["extract-tile", map, x, y, flag, out, rest @ ..] if *flag == "-o" => {
             let Ok(x) = x.parse::<i64>() else {
                 usage();
@@ -346,5 +449,6 @@ fn main() -> ExitCode {
             out,
             assets,
         } => run_extract_tile(map, x, y, out, assets),
+        Action::Render { map, out, assets } => run_render(map, out, assets),
     }
 }
