@@ -50,4 +50,4 @@ AUD(IMA ADPCM,XCC 变体步长表)、VXL、HVA。
 
 ## ra2-map
 
-    ra2-map render <map.map> -o <out.png> [--assets <dir>]   # M4a 整幅地形渲染 PNG(等距投影/z 接缝/缺环统计;本机真彩限 TEMPERATE/SNOW/URBAN)
+    ra2-map render <map.map> -o <out.png> [--assets <dir>]   # M4b 场景合成 PNG(地形+overlay+物件;voxel 载具/飞机计数跳过;本机真彩限 TEMPERATE/SNOW/URBAN)

@@ -105,3 +105,33 @@ L6 Draw_Terrain 倒序裁决 → 差率异常首查。全部清单见研究 §9,
 
 研究文档(本日)= 事前实钉全录;M4a spec/research = 画布/投影/预算基线;
 ra2-decomp(只读)file:line 引文见研究 §1-§4;真图字段实证见研究 §5。
+
+## 10. 实施期勘误与细化(T9,2026-11-09;按落地实现与 T8 807 实测回填)
+
+1. **① Terrain 键序笔误(T0 勘误)**:研究 §5 原稿 `[Terrain]` 键序
+   `X·1000+Y` 系笔误,真语义 = **Y·1000+X**(键名 `KeyY1000X` 自证;
+   M2 objects.rs `n % 1000 → x, n / 1000 → y` 既有解析即此),T0 已改。
+2. **② SceneStats 细化**:§6 桶清单落地为 overlay_drawn / overlay_no_type /
+   overlay_missing_file / **overlay_fail**、objects_drawn /
+   objects_skipped_voxel / objects_missing_art / objects_malformed /
+   **objects_fail**,外加 **frame_clamp / clip 独立信息位桶**
+   (render/mod.rs `SceneStats`,T5/T6 依赖字段集冻结);守恒口径 =
+   **非 Smudge 物件恰落一桶**(Smudge 顺延 M4c,不入桶不入式)。
+3. **③ `objects_typed.rs` 收敛**:§4 的 `format/map/objects_typed.rs`
+   独立文件**不建**——M2 `objects.rs` 类型化访问器
+   (class/kind/cell/sub_cell/owner)已覆盖,T3 仅补 `render_facing`。
+4. **④ 方图上限笔误**:§3 "守卫注释 269²" 系笔误,正确 = **272² ≈
+   133.4 Mpx**(60w·(30w+15) ≤ 2²⁷ 真根 w ≈ 272.82;T0 算术,
+   源码守卫注释已按 272² 落地)。
+5. **⑤ `render_scene` 签名**:返回 `Result<SceneRender, FormatError>`
+   (非 §4 草案的 Option;计划期微调落定,地形合成失败即败)。
+6. **⑥ 桥 NS 偏移与桥高 z 附加顺延 M4c**:BRIDGE_VARIATION 16 项变体表
+   已落(overlay.rs,cell.cpp:1422-1427),但 NS 桥像素偏移 (−15,7) 与
+   桥高 z 附加(cell.cpp:1408/1372-1376)不感知,并入 §8 M4c 清单。
+7. **⑦ Preview 终验裁定(2026-11-09,T8)= 走向 A 钉断言**:真彩含
+   Preview n=507,最优组合 **RGB 434/507 = 85.6%** ≥ 85% → 三断言钉死
+   (total==507、best=="RGB"、frac≥0.85);RGB+flip 66(13.0%)、
+   BGR 4、BGR+flip 3 只报告不钉。**M4a 顺延的通道序裁定就此关闭**
+   (裁定详情与全账见研究 §10)。
+8. **⑧ 预算定值 = 10578 ms/图**:政策 = 实测 max×3、硬帽 15s
+   (定值取首跑实测 max 3526ms;Step 4 复跑 max 3463ms,界内)。

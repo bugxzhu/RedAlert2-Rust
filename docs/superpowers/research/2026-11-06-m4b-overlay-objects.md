@@ -51,6 +51,19 @@
   缺档再试剧场后缀)。
 - OverlayLayers 双层网格语义(M2 已裁决)不变:type_at 0xFF=空,
   frame_at 空档→None。菱形坐标直用(x,y ∈ 1..=W+H−1 < 512 恒在网格内)。
+- **零售证据(T8 m4b_overlay_table_retail_sanity,2026-11-09)**:零售
+  rulesmd.ini `[OverlayTypes]` len=250;bridge 前缀名恰 4
+  (BRIDGE/BRIDGE/BRIDGB/BRIDGB——Image= 覆盖使 BRIDGE1/BRIDGE2/BRIDGEB1/
+  BRIDGEB2 四类型段共享两图像,变体帧消费的零售佐证);ore(Tiberium)
+  游程 (基,长) 实测 [(27,12),(102,20),(127,40)] 三组连续游程
+  (游程等价性与 display_byte 游程语义自洽);Crate=yes 恰 2(crate 帧
+  特判的零售载体)。
+- **行内 `;` 注释剥离(T8 实跑暴露,控制器 2026-11-09 裁定为必修)**:零售
+  [OverlayTypes] 条目名与 Image= 值带行内 `;` 尾注(实测
+  `BRIDGE1      ;26 &`)→ OverlayTable 层剥离(首个 `;` 截断再 trim;
+  引擎 rules 解析器取值前剥注释语义,IniDocument 本体 M1 冻结不动)
+  → 807 全量 overlay missing_file 2656 → 0、drawn 232609 → 235265
+  (+2656 精确)。
 
 ## 3. 锚定(Q4 实钉;画布绝对坐标)
 
@@ -92,7 +105,8 @@
 - `[Units]`/`[Aircraft]` `ID=Owner,Type,Health,X,Y,Facing,Mission,Tag,…`
   (c1a02md Aircraft 同构实证);
 - `[Infantry]` `ID=Owner,Type,Health,X,Y,`**`Subcell`**`,Facing,Mission,Tag,…`
-  (austintx COW 行 [5]=0..4、[6]=32/64/158/186 → 子格在前、朝向 0..255);
+  (austintx COW 行 [5]=0..4、[6]=32/64/158/186 → 子格在前、朝向 0..255;
+  T3 语料抽验 2026-11-09:807 全量字段与本节布局吻合,无新发现);
 - `[Terrain]` `KeyY1000X=TreeName`(**键 = Y·1000+X,M2 裁定,objects.rs:73
   `n % 1000 → x, n / 1000 → y` 已实现**;37084 → x=84,y=37;控制器预写
   X·1000+Y 系笔误,此行即勘误);
@@ -123,16 +137,47 @@ cache 顺序链(theater.rs:360-375)→ `lookup("rulesmd.ini")/("artmd.ini")/
 ——最优组合稳定占比 ≥85%(真彩图口径)才钉;否则记"未稳定"仅报告。
 差率分布**只报告不设阈值**(remap/阴影/voxel 缺席,阈值会钉错基线)。
 
-## 9. 低置信/待钉清单(实现期任务内闭环)
+## 9. 低置信/待钉清单(实现期任务内闭环;T8 回填 2026-11-09 全表落定)
 
-| # | 项 | 处置 |
-|---|---|---|
-| L1 | 建筑 in-game Draw_It 未反编译 | Editor_Draw_It 锚定落地,差率监督 |
-| L2 | HumanShape 表值缺 | 等价公式 + 帧数复核 |
-| L3 | 步兵子格偏移 | decomp 钉或差率择优 |
-| L4 | 剧场后缀变体规则 | overtype.cpp:179/186 直读 |
-| L5 | 步兵 idle 帧块 / 树静态帧 | 真资产帧数钉,兜底帧 0 计数 |
-| L6 | Draw_Terrain 倒序路径(§1 裁决) | 差率异常时首查 |
+| # | 项 | 处置(计划) | 结论(T8 回填) |
+|---|---|---|---|
+| L1 | 建筑 in-game Draw_It 未反编译 | Editor_Draw_It 锚定落地,差率监督 | 已落地:Editor 路径锚定(TL=NW 角 + 垂直对中);Preview 差率继续监督(807 实测无系统性异常) |
+| L2 | HumanShape 表值缺 | 等价公式 + 帧数复核 | 已钉:等价公式 `(dir32·Facings+16)>>5` 落地(objects.rs,四舍五入;真 SHP 帧数随 807 零 panic 复核) |
+| L3 | 步兵子格偏移 | decomp 钉或差率择优 | 已钉:SUBCELL_OFFSETS = (0,0)/(−15,−8)/(15,−8)/(−15,7)/(15,7)(objects.rs;第 6 槽 (0,0) 为越界钳防御) |
+| L4 | 剧场后缀变体规则 | overtype.cpp:179/186 直读 | 已钉:load_shp 候选链 "{image}.shp" → "{image}.{剧场扩展名}"(shape.rs;小写缓存键,Missing/Fail 负缓存) |
+| L5 | 步兵 idle 帧块 / 树静态帧 | 真资产帧数钉,兜底帧 0 计数 | 已钉:art StandFrame 帧块直接消费(objects.rs);钉不住 → 帧 0 兜底计数 |
+| L6 | Draw_Terrain 倒序路径(§1 裁决) | 差率异常时首查 | 未触发:807 Preview 差率无系统性异常,倒序裁决维持(首查点保留) |
+
+## 10. 实测回填(T8 807 全量实跑,2026-11-09;原始账 task-8-assets-run2.log)
+
+数据源:`RA2_ASSETS_DIR` 807 全量场景渲染(Step 4 终态跑,656.73s,零
+panic,守恒恒等逐图绿;基线跑 task-8-assets-run.log 与终态的差异即
+§2 行内注释剥离条)。
+
+- **807 总账(overlay)**:drawn 235265 / no_type 0 / missing_file 0 /
+  fail 28946 —— overlay 人口 264211 = 四桶和(逐图独立重数复核,非信统计)。
+- **807 总账(objects,非 Smudge)**:drawn 511347 / skipped_voxel 8320 /
+  missing_art 3539 / malformed 1 / fail 3155 —— 人口 528362。
+- **voxel 跳过量级**:8320(全部 [Units]/[Aircraft] 记录计数跳过;
+  M4c 立项,用户裁决 §4)。
+- **clip/钳帧占比**:clip 15858/746612 = **2.12%**(<5%;NewUrban 5456
+  主导——近画布缘桥/建筑);frame_clamp 19(信息位,非失败)。
+- **overlay_fail = 28946(~11% overlay 人口)**为最大非 drawn 桶:真
+  overlay SHP 解析失败,疑 SHP-TS 压缩/格式变体未覆盖(RLEZeroTS 路径),
+  M4c 候选;objects_fail 3155 同类。
+- **Preview 终验裁定(§8 设计 → 走向 A 钉断言)**:真彩含 Preview n=507,
+  四组合直方图 RGB 434 = **85.6%** / RGB+flip 66 = 13.0% / BGR 4 = 0.8% /
+  BGR+flip 3 = 0.6% → 最优组合稳定占比 ≥85% 达标,**三断言钉死**
+  (probed==507 / modal=="RGB" / frac≥0.85);少数派只报告不钉。
+  **M4a 顺延的通道/行序裁定就此关闭**;逐图差率仍高(remap/阴影/voxel
+  缺席所致,通道/行序非解释——M4a 走向 B 系统性差观察不变)。
+- **预算**:10578 ms/图(政策 = 实测 max×3;定值取首跑实测 3526ms,
+  Step 4 复跑 max 3463ms 亦在界内;15s 硬帽内)。均值 723ms / p90 1759ms /
+  总 583635ms。
+- **剧场分档**:Temperate 324 / Snow 106 / Urban 78 / Desert 170 /
+  NewUrban 128 / Lunar 1 = 807(M4a 钉值不变;真彩三剧场抽样 PPM +
+  哑调色板三剧场零 panic 同 M4a 口径)。
+- §9 L1-L6 全表落定(见 §9 表结论列);spec 侧勘误见其 §10 附录。
 
 ## 出处
 
