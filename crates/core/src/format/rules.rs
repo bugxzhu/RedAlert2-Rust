@@ -19,6 +19,16 @@ use crate::format::ini::IniDocument;
 /// 0xFF = OVERLAY_NONE(overlay.cpp:418-419)。
 pub const OVERLAY_NONE: u8 = 0xFF;
 
+/// 行内注释剥离(RA2 INI 引擎语义:`;` 起行内尾注,rules 解析器取值前
+/// 剥注释——语义重写勿转录;IniDocument 本体 M1 冻结不动,只在
+/// OverlayTable 层剥)。首个 `;` 起截断再 trim。
+fn strip_inline_comment(s: &str) -> &str {
+    match s.find(';') {
+        Some(i) => s[..i].trim(),
+        None => s.trim(),
+    }
+}
+
 /// 逐型条目(表位 → 图名/旗标)。
 struct Entry {
     image: String,
@@ -47,13 +57,13 @@ impl OverlayTable {
         let mut entries = Vec::new();
         if let Some(list) = doc.section("OverlayTypes") {
             for (_, name) in &list.entries {
-                let name = name.trim();
+                let name = strip_inline_comment(name);
                 if name.is_empty() {
                     continue;
                 }
                 let image = doc
                     .value(name, "Image")
-                    .map(str::trim)
+                    .map(strip_inline_comment)
                     .filter(|s| !s.is_empty())
                     .unwrap_or(name)
                     .to_string();
@@ -174,5 +184,30 @@ Crate=yes
         let t = OverlayTable::parse("[Whatever]\n1=x\n");
         assert_eq!(t.len(), 0);
         assert!(t.kind(0).is_none());
+    }
+
+    /// 行内注释剥离(T8 验收暴露,控制器 2026-11-09 裁定):引擎 rules
+    /// 解析器取值前剥 `;` 行内注释(rules.cpp 注释语义;语义重写勿转录,
+    /// IniDocument 本体 M1 冻结不动,只在 OverlayTable 层剥)。零售
+    /// [OverlayTypes] 条目带尾注(实测 `BRIDGE1      ;26 &`),不剥则
+    /// image 带注查档必 miss。
+    #[test]
+    fn inline_comment_stripped_from_name_and_image() {
+        // 字节 = 段内位置(0 基),键数字不参与(byte_is_list_position_not_key)
+        let t = OverlayTable::parse(
+            "[OverlayTypes]\n0=BRIDGE1  ;26 &\n1=OREXX\n[BRIDGE1]\nImage=BRIDGEB  ;27 same art\n[OREXX]\n",
+        );
+        assert_eq!(
+            t.kind(0).unwrap().image,
+            "BRIDGEB",
+            "条目名与 Image= 值均剥尾注"
+        );
+        assert!(t.kind(0).unwrap().bridge, "bridge 前缀判定用剥后名");
+        assert_eq!(
+            t.kind(1).unwrap().image,
+            "OREXX",
+            "缺 Image= 回退剥后条目名"
+        );
+        assert_eq!(t.len(), 2);
     }
 }

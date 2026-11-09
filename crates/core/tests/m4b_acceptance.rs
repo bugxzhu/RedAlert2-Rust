@@ -5,14 +5,15 @@
 //! 全部 ignore,需 RA2_ASSETS_DIR。
 //!
 //! 验收口径:
-//! - 逐图 render_scene 计时,预算 `ms < 15000` 为首跑占位(Step 3 控制器
-//!   按实测 max×3 收紧,硬帽 15000);
+//! - 逐图 render_scene 计时,预算 `ms < 10578`(Step 3 裁定:实测最慢
+//!   3526ms ×3;政策 = 实测×3,硬帽 15s);
 //! - 守恒恒等三组(T4/T6 同式,population 独立重数不信 stats):地形七桶、
 //!   非空 overlay(走位域 records 内 type≠0xFF)四桶、非 Smudge 物件五桶;
 //! - 画布尺寸 = M4a 公式独立重算(walk_extremes + records z_max 实扫);
 //! - 哑调色板剧场(DESERT/NEWURBAN/LUNAR)与真彩同循环全 807 零 panic
 //!   (m4a 口径),真彩剧场各抽一图 PPM;
-//! - Preview 四组合直方图仅对真彩图统计(哑调色板必 100% 差,无裁定意义)。
+//! - Preview 四组合直方图仅对真彩图统计(哑调色板必 100% 差,无裁定意义);
+//!   Step 3 裁定 = 走向 A:最优组合钉 RGB(实测 434/507 = 85.6% ≥ 85%)。
 
 use ra2_core::format::art::ArtIndex;
 use ra2_core::format::map::mapdoc::decode_map_text;
@@ -215,10 +216,11 @@ fn m4b_all_maps_scene_render() {
         let t0 = std::time::Instant::now();
         let r = render_scene(&m, &assets, &ini, &table, &art, &pal).expect("全量合成零 panic");
         let ms = t0.elapsed().as_millis();
-        // 预算:首跑占位 15000(计划硬帽;Step 3 控制器按实测 max×3 收紧)
+        // 预算:实测最慢 3526ms ×3 = 10578(政策 = 实测×3,计划硬帽 15s;
+        // Step 3 控制器 2026-11-09 裁定收紧)
         assert!(
-            ms < 15_000,
-            "{} 耗时 {ms}ms 超 M4b 首跑占位预算",
+            ms < 10_578,
+            "{} 耗时 {ms}ms 超 M4b 预算(实测 max×3,硬帽 15s)",
             path.display()
         );
         total += 1;
@@ -390,6 +392,20 @@ fn m4b_all_maps_scene_render() {
             100.0 * *v as f64 / preview_probed.max(1) as f64
         );
     }
+    // Step 3 控制器裁定 = 走向 A(2026-11-09):实测最优组合稳定占比
+    // 85.6%(434/507)≥ 85% → 钉 RGB 最众;RGB+flip 13.0% 为少数派仅报告
+    //(M4a 通道序裁决闭环,spec §7.3)。
+    assert_eq!(preview_probed, 507, "真彩含 Preview 图数钉死(T8 实测)");
+    let (best_combo, best_count) = preview_hist
+        .iter()
+        .max_by_key(|(_, v)| **v)
+        .map(|(k, v)| (*k, *v))
+        .unwrap_or(("", 0));
+    assert_eq!(best_combo, "RGB", "最众组合钉 RGB(T8 实测 85.6%)");
+    assert!(
+        best_count as f64 / preview_probed.max(1) as f64 >= 0.85,
+        "RGB 稳定占比 ≥85%(实测 {best_count}/{preview_probed})"
+    );
     assert_eq!(total, 807, "语料 = 807(M2/M3/M4a 口径)");
     // §6.5 缺槽账(m4a 同式):807 图地形引用性缺档 = 0
     assert_eq!(
