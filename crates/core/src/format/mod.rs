@@ -14,6 +14,7 @@ pub mod map;
 pub mod mix;
 pub mod pal;
 pub mod rle_zero_ts;
+pub mod rules;
 pub mod shp;
 pub mod shp_ts;
 pub mod theater;
