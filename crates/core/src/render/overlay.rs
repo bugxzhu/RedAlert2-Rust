@@ -18,7 +18,7 @@ use crate::render::{SceneStats, ShpCache, CELL_DX, CELL_DY, Z_STEP};
 /// 桥面板完整帧变体(cell.cpp:1422-1427,索引 (x&3)|(4·(y&3)))。
 const BRIDGE_VARIATION: [usize; 16] = [0, 1, 2, 3, 3, 2, 1, 0, 2, 3, 0, 1, 1, 0, 3, 2];
 
-#[allow(dead_code, clippy::too_many_arguments)] // T5 scene 接线后移除 dead_code;冻结签名 15 参直传
+#[allow(clippy::too_many_arguments)] // 冻结签名 15 参直传
 pub(crate) fn paint_overlays(
     map: &MapFile,
     assets: &TheaterAssets,
@@ -123,10 +123,11 @@ mod tests {
 
     /// open() 必需 ra2.mix + ra2md.mix(terrain.rs tests 同款);资产全放
     /// ra2md(优先级 100),文件名全小写——lookup 大小写不敏感,覆盖
-    /// load_shp 的 "{IMAGE}.shp" 大写候选。
-    fn tiny_assets(files: &[(&str, Vec<u8>)]) -> TheaterAssets {
+    /// load_shp 的 "{IMAGE}.shp" 大写候选。目录名带测试名:并行线程各自
+    /// 独占(纯时间戳在 Windows 粗粒度时钟下会撞目录,互删 mix)。
+    fn tiny_assets(tag: &str, files: &[(&str, Vec<u8>)]) -> TheaterAssets {
         let d = std::env::temp_dir().join(format!(
-            "ra2-overlay-t{}",
+            "ra2-overlay-{tag}-{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
@@ -396,10 +397,13 @@ mod tests {
     #[test]
     fn overlay_paints_cell_and_conservation() {
         let pal = test_palette();
-        let assets = tiny_assets(&[
-            ("tst01.sno", tmp60(9)),
-            ("ore01.shp", shp_raw(&[body60(7, true)])),
-        ]);
+        let assets = tiny_assets(
+            "paints",
+            &[
+                ("tst01.sno", tmp60(9)),
+                ("ore01.shp", shp_raw(&[body60(7, true)])),
+            ],
+        );
         let map = overlay_map(
             (2, 2),
             &types_layer(&[(2, 2, 0)]),
@@ -459,18 +463,21 @@ mod tests {
     #[test]
     fn crate_bridge_clamp_counters() {
         let pal = test_palette();
-        let assets = tiny_assets(&[
-            ("tst01.sno", tmp60(9)),
-            ("gasand.shp", shp_raw(&[body60(7, false)])),
-            (
-                "crate01.shp",
-                shp_raw(&[body60(3, false), body60(4, false)]),
-            ),
-            (
-                "bridge1.shp",
-                shp_raw(&[body60(5, false), body60(6, false)]),
-            ),
-        ]);
+        let assets = tiny_assets(
+            "bridge",
+            &[
+                ("tst01.sno", tmp60(9)),
+                ("gasand.shp", shp_raw(&[body60(7, false)])),
+                (
+                    "crate01.shp",
+                    shp_raw(&[body60(3, false), body60(4, false)]),
+                ),
+                (
+                    "bridge1.shp",
+                    shp_raw(&[body60(5, false), body60(6, false)]),
+                ),
+            ],
+        );
         let map = overlay_map(
             (3, 2),
             &types_layer(&[(2, 2, 1), (3, 2, 2), (4, 2, 0)]),

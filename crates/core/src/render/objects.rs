@@ -23,7 +23,7 @@ fn facing_idx(facing: u32, facings: u32) -> u32 {
     (((u64::from(facing) * f + 128) >> 8) as u32).min(facings.max(1) - 1)
 }
 
-#[allow(dead_code, clippy::too_many_arguments)] // T6 scene 接线后移除 dead_code;冻结签名 13 参直传
+#[allow(clippy::too_many_arguments)] // 冻结签名 13 参直传
 pub(crate) fn paint_objects(
     map: &MapFile,
     assets: &TheaterAssets,

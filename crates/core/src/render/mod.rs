@@ -6,6 +6,7 @@
 
 pub mod objects;
 pub mod overlay;
+pub mod scene;
 pub mod shape;
 pub mod terrain;
 
