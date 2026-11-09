@@ -36,7 +36,9 @@ pub fn paint_canvas(palette: &Palette, cx: usize, cy: usize, diamond: &[u8]) -> 
     (off == diamond.len()).then_some(rgb)
 }
 
-use super::{RenderStats, TerrainRender, CELL_DX, CELL_DY, MAX_RENDER_PIXELS, Z_STEP};
+use super::{
+    RenderStats, TerrainRender, CELL_DX, CELL_DY, CELL_H, CELL_W, MAX_RENDER_PIXELS, Z_STEP,
+};
 use crate::format::map::iso::IsoTile;
 use crate::format::map::MapFile;
 use crate::format::theater::{theater_spec, SlotFile, TheaterAssets, TheaterIni};
@@ -157,9 +159,14 @@ pub(crate) fn compose_terrain(
                                 - Z_STEP as i64 * i64::from(t.z);
                             if cx as usize != 2 * cy as usize {
                                 stats.parse_fail += 1; // 非 2:1
-                            } else if sx < 0 || sy < 0 {
+                            } else if sx < 0
+                                || sy < 0
+                                || sx as u64 + CELL_W as u64 > width as u64
+                                || sy as u64 + CELL_H as u64 > height as u64
+                            {
                                 // 存储坐标权威但可病态越出走位域(iso.rs 只验
                                 // 1..=w+h−1 包围盒,界内 ≠ 走位格):不落画布
+                                // 上溢侧同计(parse_fail):越出走位域的记录可能仅右/下越界(M4a N1)
                                 stats.parse_fail += 1;
                             } else if !blit_diamond(
                                 &mut rgb,
@@ -528,6 +535,7 @@ mod tests {
     }
 
     /// 缺环全链各计其数、不中止;七类计数恒等(cells = 和,记录口径)。
+    /// 含 N1 仅上溢越域一条(走位域外但包围盒内,右缘越界)。
     #[test]
     fn missing_chain_counts() {
         let pal = test_palette();
@@ -541,11 +549,13 @@ mod tests {
             "[TileSet0000]\nFileName=tst\nTilesInSet=3\n[TileSet0001]\nTilesInSet=1\n",
         )
         .unwrap(); // set0001 无 FileName → 槽 3 = Reserved;全局槽位共 4
-                   // 3×2 图的 7 条记录(d 升序;走位域含 (3,1),(2,2),(1,3),(3,2),…)
+                   // 3×2 图的 8 条记录(d 升序;走位域含 (3,1),(2,2),(1,3),
+                   // (3,2),…;(4,1) 在包围盒内但走位域外,仅右缘越界 = N1)
         let records = vec![
             tile(3, 1, -1, 0, 0), // no_tile(tile=-1)
             tile(2, 2, 0, 0, 0),  // painted(tst01)
             tile(1, 3, 3, 0, 0),  // reserved(set0001 占位)
+            tile(4, 1, 0, 0, 0),  // parse_fail(N1 仅上溢越域:右缘出画布)
             tile(3, 2, 1, 0, 0),  // parse_fail(tst02 敌意)
             tile(2, 3, 9, 0, 0),  // out_of_range(越 4 槽)
             tile(4, 2, 2, 0, 0),  // missing_file(tst03 未出货)
@@ -553,10 +563,11 @@ mod tests {
         ];
         let r = compose_terrain(3, 2, &records, &assets, &ini, "ubn", &pal).unwrap();
         assert_eq!((r.width, r.height), (180, 75)); // 极值 (4,7,−2,2) 口径
-        assert_eq!(r.stats.cells, 7);
-        assert_eq!(r.stats.painted, 1);
+        assert_eq!(r.stats.cells, 8);
         assert_eq!(r.stats.no_tile, 1);
-        assert_eq!(r.stats.parse_fail, 1);
+        // N1:仅上溢越域(右/下缘越界)→ parse_fail,不再计 painted
+        assert_eq!(r.stats.painted, 1);
+        assert_eq!(r.stats.parse_fail, 2);
         assert_eq!(r.stats.missing_file, 1);
         assert_eq!(r.stats.reserved, 1);
         assert_eq!(r.stats.out_of_range, 1);

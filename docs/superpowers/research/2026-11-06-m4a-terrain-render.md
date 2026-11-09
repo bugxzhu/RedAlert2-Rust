@@ -45,6 +45,8 @@
   Urban 78 / Desert 170 / NewUrban 128 / Lunar 1;正则 ^Theater= 行口径
   仅 531(212/106/78/73/61/1)——RMG 模板(MapUnits 267)无 Theater 头,
   以 parse 为准。
+- no_tile 371(c1a01md)= M2 研究 2026-11-04-map-pack §12 样本首值,独立
+  交叉验证(C1 终审补引,N3)。
 
 ## 4. Preview 对拍裁定(2026-11-06 重裁,C1 域改后两代数据在案)
 - 走向 B 维持:对拍顺延 M4b 终验(spec §6.4 勘误已入 9c4f84f)。修复前

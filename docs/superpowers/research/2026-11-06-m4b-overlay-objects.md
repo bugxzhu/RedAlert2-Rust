@@ -93,7 +93,9 @@
   (c1a02md Aircraft 同构实证);
 - `[Infantry]` `ID=Owner,Type,Health,X,Y,`**`Subcell`**`,Facing,Mission,Tag,…`
   (austintx COW 行 [5]=0..4、[6]=32/64/158/186 → 子格在前、朝向 0..255);
-- `[Terrain]` `KeyX1000Y=TreeName`(37084=TREE11 → 键 = X·1000+Y);
+- `[Terrain]` `KeyY1000X=TreeName`(**键 = Y·1000+X,M2 裁定,objects.rs:73
+  `n % 1000 → x, n / 1000 → y` 已实现**;37084 → x=84,y=37;控制器预写
+  X·1000+Y 系笔误,此行即勘误);
 - `[Smudge]` → M4c(样本多空,austintx 无)。
 - decomp 加载侧佐证:overlay.cpp:418-425([OverlayPack] 逐字节→classid)、
   overlay.cpp:457-461([OverlayDataPack] 逐字节→OverlayData)。
