@@ -49,6 +49,7 @@ fn maps() -> Vec<std::path::PathBuf> {
     }
     let mut v = Vec::new();
     walk(&assets_dir(), &mut v);
+    v.sort();
     v
 }
 
