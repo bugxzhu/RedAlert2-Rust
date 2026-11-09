@@ -2,6 +2,7 @@
 
 //! 原版资产容器与数据格式解析。
 
+pub mod art;
 pub mod aud;
 pub mod bytes;
 pub mod crc;
