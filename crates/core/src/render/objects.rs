@@ -67,6 +67,9 @@ pub(crate) fn paint_objects(
     drawable.sort_by_key(|(k, _)| *k);
     for (_, o) in drawable {
         let (x, y) = o.cell().unwrap();
+        // 守恒不变量哨兵(不可达):上游已按 class 过滤(非 Smudge 恒有
+        // kind),kind().is_none() 已在入桶前计 objects_malformed——上游
+        // 过滤条件改动时此处会先暴露,勿删。
         let Some(kind) = o.kind() else { continue };
         // 0 基 → 记录坐标;敌意大值钳到域外(u16::MAX 远超走位域 → 自然
         // Outside 计 clip,绝不截断落错位置)。saturating_add:u32::MAX+1
@@ -93,6 +96,8 @@ pub(crate) fn paint_objects(
                 let e = art.get_or_default(kind, 8);
                 let f = o.render_facing().unwrap_or(0);
                 let idx = facing_idx(f, e.facings) as usize;
+                // .min(5) 不可达防御:解析期已滤 sub_cell 0..=5
+                // (format objects.rs sub_cell())——双保险,防未来解析域放宽越表。
                 let (ox, oy) = SUBCELL_OFFSETS[(o.sub_cell().unwrap_or(0) as usize).min(5)];
                 (
                     e.image,

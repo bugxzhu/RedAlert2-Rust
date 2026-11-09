@@ -53,8 +53,8 @@
   frame_at 空档→None。菱形坐标直用(x,y ∈ 1..=W+H−1 < 512 恒在网格内)。
 - **零售证据(T8 m4b_overlay_table_retail_sanity,2026-11-09)**:零售
   rulesmd.ini `[OverlayTypes]` len=250;bridge 前缀名恰 4
-  (BRIDGE/BRIDGE/BRIDGB/BRIDGB——Image= 覆盖使 BRIDGE1/BRIDGE2/BRIDGEB1/
-  BRIDGEB2 四类型段共享两图像,变体帧消费的零售佐证);ore(Tiberium)
+  (BRIDGE/BRIDGE/BRIDGB/BRIDGB,类型名 BRIDGE1/BRIDGE2/BRIDGEB1/BRIDGEB2
+  ——Image= 覆盖使四类型段共享两图像,变体帧消费的零售佐证);ore(Tiberium)
   游程 (基,长) 实测 [(27,12),(102,20),(127,40)] 三组连续游程
   (游程等价性与 display_byte 游程语义自洽);Crate=yes 恰 2(crate 帧
   特判的零售载体)。

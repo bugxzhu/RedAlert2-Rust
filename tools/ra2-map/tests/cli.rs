@@ -142,8 +142,9 @@ fn data_layer(cells: &[(u16, u16, u8)]) -> Vec<u8> {
     v
 }
 
-/// 与 core 测试同一张 mini 地图(SNOW 4×4,2 瓦片,1 结构 1 地形,预览 2×1);
-/// 与 core 版的差异:无 [Actions] 段 → logic_sections=1(仅 Waypoints)。
+/// 与 core 测试同构的 mini 地图(SNOW 4×4,2 瓦片,1 结构 1 地形,预览 2×1);
+/// 与 core 版的差异:① 记录 #1 移至 (4,1)(原 (1,1) 在走位域外,见下方
+/// 偏差记录);② 无 [Actions] 段 → logic_sections=1(仅 Waypoints)。
 /// `ovl` = overlay 双包逐格改写 ((x, y, 类型, 帧));空 = 全 0xFF/全 0
 /// 原始层(编码字节与旧 lcw_fill_stream 等价,既有断言不变)。
 fn mini_map_with(ovl: &[(u16, u16, u8, u8)]) -> Vec<u8> {
