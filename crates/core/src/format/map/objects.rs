@@ -91,6 +91,18 @@ impl MapObject {
         }
     }
 
+    /// 渲染朝向(M4b):Structure/Unit/Aircraft = field 5;Infantry 的
+    /// field 5 是 sub_cell,朝向在 field 7(真图实证 2026-11-06,研究 §5);
+    /// Terrain/Smudge 无。非整数或 >255 → None(宽容)。
+    pub fn render_facing(&self) -> Option<u32> {
+        let idx = match self.class {
+            ObjectClass::Infantry => 7,
+            ObjectClass::Structure | ObjectClass::Unit | ObjectClass::Aircraft => 5,
+            ObjectClass::Terrain | ObjectClass::Smudge => return None,
+        };
+        self.field(idx)?.trim().parse().ok().filter(|&f| f <= 255)
+    }
+
     /// 步兵 sub_cell(仅 Infantry field 5,合法域 0..=5,越域 → None)。
     pub fn sub_cell(&self) -> Option<u8> {
         match self.class {
@@ -274,6 +286,55 @@ mod tests {
         assert_eq!(objs.count(ObjectClass::Terrain), 1);
         assert_eq!(objs.count(ObjectClass::Smudge), 0);
         assert_eq!(objs.malformed, 0);
+    }
+
+    #[test]
+    fn render_facing_infantry_field7_real_rows() {
+        // austintx COW 行:sub=4/facing=32 与 sub=2/facing=64(研究 §5 实证)
+        let a = one(
+            "Infantry",
+            "0",
+            "Neutral,COW,256,128,42,4,Guard,32,None,0,-1,0,1,1",
+        );
+        assert_eq!(a.render_facing(), Some(32));
+        let b = one(
+            "Infantry",
+            "1",
+            "Neutral,COW,256,126,52,2,Guard,64,None,0,-1,0,1,1",
+        );
+        assert_eq!(b.render_facing(), Some(64));
+        assert_eq!(b.facing(), None); // M2 冻结语义:Infantry field 5=sub_cell
+    }
+
+    #[test]
+    fn render_facing_other_classes_and_hostile() {
+        let s = one(
+            "Structures",
+            "0",
+            "Neutral,CABHUT,256,103,64,192,None,0,0,1,0,0,None,None,None,0,0",
+        );
+        assert_eq!(s.render_facing(), Some(192));
+        let u = one(
+            "Units",
+            "0",
+            "Neutral,CAR,256,66,104,64,Sleep,None,0,-1,0,-1,1,1",
+        );
+        assert_eq!(u.render_facing(), Some(64));
+        // 敌意:field 7 非整数 / >255 → None(不 panic)
+        let bad = one(
+            "Infantry",
+            "0",
+            "Neutral,COW,256,1,2,3,Guard,zzz,None,0,-1,0,1,1",
+        );
+        assert_eq!(bad.render_facing(), None);
+        let over = one(
+            "Infantry",
+            "0",
+            "Neutral,COW,256,1,2,3,Guard,300,None,0,-1,0,1,1",
+        );
+        assert_eq!(over.render_facing(), None);
+        let t = one("Terrain", "1002", "TIBTRE01");
+        assert_eq!(t.render_facing(), None);
     }
 
     #[test]
