@@ -4,6 +4,7 @@
 //! 2026-11-06-m4a-terrain-render-design.md)。纯计算零 I/O;工具层
 //! (`ra2-map render`)负责读资产/写 PNG。
 
+pub mod objects;
 pub mod overlay;
 pub mod shape;
 pub mod terrain;
