@@ -157,7 +157,8 @@ panic,守恒恒等逐图绿;基线跑 task-8-assets-run.log 与终态的差异�
 - **807 总账(overlay)**:drawn 235265 / no_type 0 / missing_file 0 /
   fail 28946 —— overlay 人口 264211 = 四桶和(逐图独立重数复核,非信统计)。
 - **807 总账(objects,非 Smudge)**:drawn 511347 / skipped_voxel 8320 /
-  missing_art 3539 / malformed 1 / fail 3155 —— 人口 528362。
+  missing_art 3539 / malformed 1 / fail 3155 —— 物件人口 526362(=
+  五桶和;守恒口径不含 Smudge)。
 - **voxel 跳过量级**:8320(全部 [Units]/[Aircraft] 记录计数跳过;
   M4c 立项,用户裁决 §4)。
 - **clip/钳帧占比**:clip 15858/746612 = **2.12%**(<5%;NewUrban 5456
