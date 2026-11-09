@@ -6,14 +6,17 @@
 //! 缺失;2 用法错误(含非 UTF-8 参数、坐标非整数)。usage 裁决先于任何
 //! 文件 IO;stdout 断管(BrokenPipe)视为成功。
 
+use ra2_core::format::art::ArtIndex;
 use ra2_core::format::map::mapdoc::decode_map_text;
 use ra2_core::format::map::meta::Theater;
 use ra2_core::format::map::objects::ObjectClass;
 use ra2_core::format::map::MapFile;
 use ra2_core::format::mix::MixArchive;
 use ra2_core::format::pal::Palette;
+use ra2_core::format::rules::OverlayTable;
 use ra2_core::format::theater::{theater_spec, SlotFile, TheaterAssets, TheaterIni};
 use ra2_core::format::theater_tmp::TsTmpFile;
+use ra2_core::render::scene::render_scene;
 use ra2_core::render::terrain::paint_canvas;
 use std::io::Write;
 use std::process::ExitCode;
@@ -24,7 +27,7 @@ fn usage() -> ! {
     eprintln!("用法: ra2-map info <file.map>");
     eprintln!("      ra2-map extract-tile <file.map> <x> <y> -o <file.png> [--assets <游戏目录>]");
     eprintln!(
-        "      ra2-map render <map.map> -o <out.png> [--assets <dir>]   整幅地形渲染 PNG(spec M4a)"
+        "      ra2-map render <map.map> -o <out.png> [--assets <dir>]   场景合成 PNG(地形+overlay+物件;voxel 计数跳过)"
     );
     eprintln!("说明: extract-tile 输出该格真瓦片位图(剧场 INI 反查 → TS TMP 槽位 →");
     eprintln!("      60×30 等距菱形 → 剧场调色板上色;行外区为调色板 0 号色)。");
@@ -131,9 +134,10 @@ fn load_theater_palette(assets: &TheaterAssets, theater: Theater) -> Result<Pale
     Palette::parse(pal).map_err(|e| format!("调色板 768B 校验失败: {e}"))
 }
 
-/// 整幅地形渲染(M4a T3):装载链复用 extract-tile(读图→解析→资产→调色板
-/// →剧场表),合成委托 `core::render::terrain::render_terrain`,PNG 落盘,
-/// 五类缺环统计入 stderr。
+/// 整幅场景渲染(M4b T7):装载链复用 extract-tile(读图→解析→资产→调色板
+/// →剧场表)再补 rulesmd.ini/artmd.ini+art.ini 三表(rules 缺席 = 提示退化,
+/// art 缺席 = 静默空缺省),合成委托 `core::render::scene::render_scene`
+/// (地形+overlay+物件),PNG 落盘,三段统计入 stderr。
 fn run_render(map_path: &str, out_path: &str, assets_opt: Option<&str>) -> ExitCode {
     let data = match std::fs::read(map_path) {
         Ok(d) => d,
@@ -187,8 +191,28 @@ fn run_render(map_path: &str, out_path: &str, assets_opt: Option<&str>) -> ExitC
             return ExitCode::from(1);
         }
     };
+    // M4b T7:rules 表(overlay 字节 → 图名)与 art 索引(物件 → 图名)。
+    // 退化契约:rulesmd.ini 缺席 = 提示 + 空表(overlay 全计 no_type);
+    // artmd.ini/art.ini 缺席 = 静默空缺省(物件按类型名查档)。
+    let table = match assets.lookup("rulesmd.ini") {
+        Some(b) => OverlayTable::parse(&decode_map_text(b)),
+        None => {
+            eprintln!("资产缺 rulesmd.ini:overlay 层全计 no_type(退化)");
+            OverlayTable::parse("")
+        }
+    };
+    let art = ArtIndex::parse(
+        &assets
+            .lookup("artmd.ini")
+            .map(decode_map_text)
+            .unwrap_or_default(),
+        &assets
+            .lookup("art.ini")
+            .map(decode_map_text)
+            .unwrap_or_default(),
+    );
     let t0 = std::time::Instant::now();
-    let r = match ra2_core::render::terrain::render_terrain(&m, &assets, &ini, &palette) {
+    let r = match render_scene(&m, &assets, &ini, &table, &art, &palette) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("合成失败: {e}");
@@ -200,19 +224,36 @@ fn run_render(map_path: &str, out_path: &str, assets_opt: Option<&str>) -> ExitC
         eprintln!("写 {out_path} 失败: {e}");
         return ExitCode::from(1);
     }
-    let s = r.stats;
+    let s = &r.stats;
+    let ov_total = s.overlay_drawn + s.overlay_no_type + s.overlay_missing_file + s.overlay_fail;
+    let ob_total = s.objects_drawn
+        + s.objects_skipped_voxel
+        + s.objects_missing_art
+        + s.objects_malformed
+        + s.objects_fail;
     eprintln!(
-        "已写 {out_path}: {}×{}px | 格 {} = 落绘 {} + 无瓦片 {} + 缺文件 {} + 保留槽 {} + 越界 {} + 空槽 {} + 解析败 {} | 剧场 {:?} | 耗时 {dt:?}",
+        "已写 {out_path}: {}×{}px | 地形 {} = 落绘 {} + 无瓦片 {} + 缺文件 {} + 保留槽 {} + 越界 {} + 空槽 {} + 解析败 {} | overlay {ov_total} = 落绘 {} + 越表 {} + 缺档 {} + 失败 {} | 物件 {ob_total} = 落绘 {} + voxel跳过 {} + 缺素材 {} + 损坏 {} + 失败 {} | 钳帧 {} 裁剪 {} | 剧场 {:?} | 耗时 {dt:?}",
         r.width,
         r.height,
-        s.cells,
-        s.painted,
-        s.no_tile,
-        s.missing_file,
-        s.reserved,
-        s.out_of_range,
-        s.missing_slot,
-        s.parse_fail,
+        s.terrain.cells,
+        s.terrain.painted,
+        s.terrain.no_tile,
+        s.terrain.missing_file,
+        s.terrain.reserved,
+        s.terrain.out_of_range,
+        s.terrain.missing_slot,
+        s.terrain.parse_fail,
+        s.overlay_drawn,
+        s.overlay_no_type,
+        s.overlay_missing_file,
+        s.overlay_fail,
+        s.objects_drawn,
+        s.objects_skipped_voxel,
+        s.objects_missing_art,
+        s.objects_malformed,
+        s.objects_fail,
+        s.frame_clamp,
+        s.clip,
         m.map_meta.theater,
     );
     ExitCode::SUCCESS

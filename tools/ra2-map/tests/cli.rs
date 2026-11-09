@@ -41,22 +41,6 @@ fn lzo_literal_stream(data: &[u8]) -> Vec<u8> {
     blob
 }
 
-// 偏差记录:brief 原文的该助手 size_in=4 且无 LCW 0x80 终止符(已知 bug 第 4 次
-// 出现)——解码器读完 0xFE 长填充后继续读下一 opcode 会 UnexpectedEof;按
-// pack.rs 测试的已验证形态修正(size_in=5,载荷以 0x80 终止)。
-fn lcw_fill_stream(fill: u8, total: usize) -> Vec<u8> {
-    let mut blob = Vec::new();
-    let mut left = total;
-    while left > 0 {
-        let n = left.min(8192);
-        blob.extend_from_slice(&5u16.to_le_bytes());
-        blob.extend_from_slice(&(n as u16).to_le_bytes());
-        blob.extend_from_slice(&[0xFE, n as u8, (n >> 8) as u8, fill, 0x80]);
-        left -= n;
-    }
-    blob
-}
-
 fn b64(bytes: &[u8]) -> String {
     const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut s = String::new();
@@ -110,11 +94,65 @@ fn rec(x: u16, y: u16, tile: i16, sub: u8, z: u8) -> [u8; 11] {
     b
 }
 
+// 偏差记录(承 lcw_fill_stream,T7 起并入本助手):块载荷必须以 0x80
+// 终止——解码器读完 0xFE 长填充后继续读下一 opcode,缺终止符会
+// UnexpectedEof(已知 bug 第 4 次出现的教训;size_in=5 同此)。
+/// 262144 字节层的 LCW 块流(支持逐格改写;core render/scene.rs tests 同款)。
+fn lcw_layer_stream(buf: &[u8]) -> Vec<u8> {
+    assert_eq!(buf.len(), 262144);
+    let mut blob = Vec::new();
+    for chunk in buf.chunks(8192) {
+        let mut p = Vec::new();
+        let mut rest = chunk;
+        while !rest.is_empty() {
+            let b = rest[0];
+            let run = rest.iter().take_while(|&&x| x == b).count();
+            if run >= 3 {
+                p.extend_from_slice(&[0xFE, run as u8, (run >> 8) as u8, b]);
+                rest = &rest[run..];
+            } else {
+                p.push(0x80 | run as u8);
+                p.extend_from_slice(&rest[..run]);
+                rest = &rest[run..];
+            }
+        }
+        p.push(0x80);
+        blob.extend_from_slice(&(p.len() as u16).to_le_bytes());
+        blob.extend_from_slice(&(chunk.len() as u16).to_le_bytes());
+        blob.extend_from_slice(&p);
+    }
+    blob
+}
+
+/// 262144 全 0xFF 类型层(OVERLAY_NONE),逐格改写(行主序 (y<<9)|x)。
+fn types_layer(cells: &[(u16, u16, u8)]) -> Vec<u8> {
+    let mut v = vec![0xFFu8; 262144];
+    for &(x, y, t) in cells {
+        v[(y as usize) << 9 | x as usize] = t;
+    }
+    v
+}
+
+/// 262144 全 0 帧层,逐格改写。
+fn data_layer(cells: &[(u16, u16, u8)]) -> Vec<u8> {
+    let mut v = vec![0u8; 262144];
+    for &(x, y, d) in cells {
+        v[(y as usize) << 9 | x as usize] = d;
+    }
+    v
+}
+
 /// 与 core 测试同一张 mini 地图(SNOW 4×4,2 瓦片,1 结构 1 地形,预览 2×1);
 /// 与 core 版的差异:无 [Actions] 段 → logic_sections=1(仅 Waypoints)。
-fn mini_map() -> Vec<u8> {
+/// `ovl` = overlay 双包逐格改写 ((x, y, 类型, 帧));空 = 全 0xFF/全 0
+/// 原始层(编码字节与旧 lcw_fill_stream 等价,既有断言不变)。
+fn mini_map_with(ovl: &[(u16, u16, u8, u8)]) -> Vec<u8> {
     let mut tiles = Vec::new();
-    tiles.extend_from_slice(&rec(1, 1, 5, 0, 0));
+    // 偏差记录(M4b T7):首记录原为 (1,1)——d=2 < walk_extremes(4,4) 的
+    // d_min=5,在走位域外,首次被场景渲染遍历时按 M4a N1 计 parse_fail;
+    // 移到域内 (4,1) 让两瓦片记录都可落绘(info/extract 断言不含坐标,不受
+    // 影响)。
+    tiles.extend_from_slice(&rec(4, 1, 5, 0, 0));
     tiles.extend_from_slice(&rec(3, 2, 6, 2, 1));
     tiles.extend_from_slice(&[0, 0, 0, 0]);
     let mut ini = String::new();
@@ -128,14 +166,34 @@ fn mini_map() -> Vec<u8> {
         "PreviewPack",
         &lzo_literal_stream(&[0xFF, 0, 0, 0, 0xFF, 0]),
     );
-    push_pack_section(&mut ini, "OverlayPack", &lcw_fill_stream(0xFF, 262144));
-    push_pack_section(&mut ini, "OverlayDataPack", &lcw_fill_stream(0x00, 262144));
+    push_pack_section(
+        &mut ini,
+        "OverlayPack",
+        &lcw_layer_stream(&types_layer(
+            &ovl.iter()
+                .map(|&(x, y, t, _)| (x, y, t))
+                .collect::<Vec<_>>(),
+        )),
+    );
+    push_pack_section(
+        &mut ini,
+        "OverlayDataPack",
+        &lcw_layer_stream(&data_layer(
+            &ovl.iter()
+                .map(|&(x, y, _, d)| (x, y, d))
+                .collect::<Vec<_>>(),
+        )),
+    );
     push_pack_section(&mut ini, "IsoMapPack5", &lzo_literal_stream(&tiles));
     ini.push_str("[Structures]\n0=Neutral,CABHUT,256,2,3,0,None,0,0,1,0,0,None,None,None,0,0\n");
     ini.push_str("[Terrain]\n2003=TIBTRE01\n");
     ini.push_str("[Waypoints]\n0=2003\n");
     ini.push_str("[Digest]\n1=qSt1w6I0r+9EWkfWl7XFZMt0Vo4=\n");
     ini.into_bytes()
+}
+
+fn mini_map() -> Vec<u8> {
+    mini_map_with(&[])
 }
 
 #[test]
@@ -469,4 +527,251 @@ fn real_map_render_outputs_png() {
         expect_h.to_be_bytes(),
         "IHDR 高 = 走位极值 + 实扫 z_max"
     );
+}
+
+// ===== M4b T7:render 场景化(合成夹具,不 ignore)=====
+
+/// 最小合法 MIX(flags=0,按名条目;core render/scene.rs tests 同款)。
+fn make_mix(entries: &[(&str, &[u8])]) -> Vec<u8> {
+    let mut v = Vec::new();
+    v.extend_from_slice(&0u32.to_le_bytes());
+    v.extend_from_slice(&(entries.len() as u16).to_le_bytes());
+    let body_len: usize = entries.iter().map(|(_, c)| c.len()).sum();
+    v.extend_from_slice(&(body_len as u32).to_le_bytes());
+    let mut off = 0u32;
+    for (name, c) in entries {
+        v.extend_from_slice(&ra2_core::format::crc::mix_name_id(name).to_le_bytes());
+        v.extend_from_slice(&off.to_le_bytes());
+        v.extend_from_slice(&(c.len() as u32).to_le_bytes());
+        off += c.len() as u32;
+    }
+    for (_, c) in entries {
+        v.extend_from_slice(c);
+    }
+    v
+}
+
+/// 临时资产目录(open() 必需 ra2.mix + ra2md.mix;scene.rs tiny_assets 同款,
+/// 目录名带 tag+纳秒:并行线程各自独占)。返回目录路径供 --assets 传入。
+fn mini_assets(tag: &str, files: &[(&str, Vec<u8>)]) -> std::path::PathBuf {
+    let d = std::env::temp_dir().join(format!(
+        "ra2-map-cli-assets-{tag}-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).unwrap();
+    let refs: Vec<(&str, &[u8])> = files.iter().map(|(n, b)| (*n, b.as_slice())).collect();
+    std::fs::write(d.join("ra2.mix"), make_mix(&[])).unwrap();
+    std::fs::write(d.join("ra2md.mix"), make_mix(&refs)).unwrap();
+    d
+}
+
+/// N 槽 60×30 TMP(槽 x 独立纯色;52B 槽头全零 = bitfield 0 无 z 无 extra;
+/// 偏移 = 文件基相对,首槽恒 16+4·n,theater_tmp.rs 布局)。
+fn tmp_multi(fills: &[u8]) -> Vec<u8> {
+    let n = fills.len();
+    let mut v = Vec::new();
+    v.extend_from_slice(&(n as u32).to_le_bytes()); // cbx
+    v.extend_from_slice(&1u32.to_le_bytes()); // cby
+    v.extend_from_slice(&60u32.to_le_bytes()); // cx
+    v.extend_from_slice(&30u32.to_le_bytes()); // cy
+    let mut off = (16 + 4 * n) as u32;
+    for _ in fills {
+        v.extend_from_slice(&off.to_le_bytes());
+        off += 52 + 900;
+    }
+    for f in fills {
+        v.extend_from_slice(&[0u8; 52]); // 槽头
+        v.extend_from_slice(&vec![*f; 900]); // RAW 菱形
+    }
+    v
+}
+
+/// 768B 剧场调色板(6 位原值 = i&63;0 号 = 背景)。
+fn palette768() -> Vec<u8> {
+    let mut v = Vec::with_capacity(768);
+    for i in 0..256u16 {
+        let c = (i & 63) as u8;
+        v.extend_from_slice(&[c, c, c]);
+    }
+    v
+}
+
+/// N 帧 W×H RAW SHP(objects.rs tests 同款):帧 i 整帧 = fills[i]。
+/// 均匀填充严格 RLE 必败 → 恒走 RAW 兜底(shp_ts.rs 判别式)。
+fn shp_frames(cx: u16, cy: u16, fills: &[u8]) -> Vec<u8> {
+    assert!(!fills.is_empty());
+    let span = cx as usize * cy as usize;
+    let mut v = Vec::new();
+    v.extend_from_slice(&0u16.to_le_bytes()); // zero
+    v.extend_from_slice(&cx.to_le_bytes()); // cx
+    v.extend_from_slice(&cy.to_le_bytes()); // cy
+    v.extend_from_slice(&(fills.len() as u16).to_le_bytes()); // count
+    let table_end = 8 + 24 * fills.len();
+    for (i, _) in fills.iter().enumerate() {
+        v.extend_from_slice(&0i16.to_le_bytes()); // x
+        v.extend_from_slice(&0i16.to_le_bytes()); // y
+        v.extend_from_slice(&cx.to_le_bytes());
+        v.extend_from_slice(&cy.to_le_bytes());
+        v.extend_from_slice(&3u32.to_le_bytes()); // flags
+        v.extend_from_slice(&[0u8; 4]); // rgba
+        v.extend_from_slice(&0u32.to_le_bytes()); // reserved
+        v.extend_from_slice(&((table_end + span * i) as u32).to_le_bytes());
+    }
+    for f in fills {
+        v.extend_from_slice(&vec![*f; span]);
+    }
+    v
+}
+
+/// 单帧 W×H RAW SHP。
+fn shp1(cx: u16, cy: u16, fill: u8) -> Vec<u8> {
+    shp_frames(cx, cy, &[fill])
+}
+
+/// T7 场景夹具资产:SNOW 剧场最小闭环(snowmd.ini 单集合覆盖瓦片 5/6 +
+/// isosno.pal + 两 TMP + 三 SHP);`rules=true` 再补 rulesmd.ini
+/// ([OverlayTypes] 0=ORE01)与 artmd.ini(CABHUT→CABHUTIMG)——缺席即
+/// CLI 退化路径(规则缺=提示,art 缺=静默)。
+fn scene_assets(tag: &str, rules: bool) -> std::path::PathBuf {
+    let mut files: Vec<(&str, Vec<u8>)> = vec![
+        (
+            "snowmd.ini",
+            b"[TileSet0000]\nFileName=tst\nTilesInSet=8\n".to_vec(),
+        ),
+        ("isosno.pal", palette768()),
+        ("tst06.sno", tmp_multi(&[9])),
+        ("tst07.sno", tmp_multi(&[30, 31, 32])),
+        ("ore01.shp", shp1(60, 30, 7)),
+        ("cabhutimg.shp", shp1(60, 30, 40)),
+        ("tibtre01.shp", shp1(1, 1, 60)),
+    ];
+    if rules {
+        files.push((
+            "rulesmd.ini",
+            b"[OverlayTypes]\n0=ORE01\n[ORE01]\nTiberium=yes\n".to_vec(),
+        ));
+        files.push(("artmd.ini", b"[CABHUT]\nImage=CABHUTIMG\n".to_vec()));
+    }
+    mini_assets(tag, &files)
+}
+
+/// 场景渲染成功路径(brief §Step 1):mini_map 夹具 + 完整场景资产
+/// (rulesmd/artmd 在档)→ exit 0、PNG 落盘、签名与 IHDR 尺寸 = M4a 公式
+/// (走位极值 + records 实扫 z_max);stderr 三段统计:overlay 落绘 1
+/// (rules 装载生效)、物件落绘 2(artmd Image 重定向 CABHUTIMG 生效 +
+/// TIBTRE01 缺省名)、地形全落绘。偏差记录:brief 原文允许空 rules/art
+/// (全退化)——改走完整装载路径,规则/素材在档与缺席(同图对照
+/// render_missing_rules_degrades)两端才有测试覆盖。
+#[test]
+fn render_scene_outputs_png_and_stats() {
+    use ra2_core::format::map::MapFile;
+    use ra2_core::render::terrain::walk_extremes;
+    let map_bytes = mini_map_with(&[(3, 2, 0, 0)]); // 格 (3,2) ORE01 帧 0
+    let dir = temp_dir("render-scene");
+    let p = dir.join("t.map");
+    std::fs::write(&p, &map_bytes).unwrap();
+    let assets_dir = scene_assets("render-scene", true);
+    let out_path = dir.join("scene.png");
+    let out = Command::new(bin())
+        .args([
+            "render",
+            p.to_str().unwrap(),
+            "-o",
+            out_path.to_str().unwrap(),
+            "--assets",
+            assets_dir.to_str().unwrap(),
+        ])
+        .env_remove("RA2_ASSETS_DIR")
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("地形 2 = 落绘 2"), "地形段: {stderr}");
+    assert!(
+        stderr.contains("overlay 1 = 落绘 1 + 越表 0"),
+        "overlay 段(rules 装载): {stderr}"
+    );
+    assert!(
+        stderr.contains("物件 2 = 落绘 2"),
+        "物件段(artmd 重定向): {stderr}"
+    );
+    assert!(
+        stderr.contains("钳帧") && stderr.contains("裁剪") && stderr.contains("耗时"),
+        "信息位段: {stderr}"
+    );
+    // IHDR 尺寸 = M4a 公式(独立重算;scene 不改画布)
+    let m = MapFile::parse(&map_bytes).unwrap();
+    let (w, h) = m.size_wh();
+    let (d_min, d_max, xmy_min, xmy_max) = walk_extremes(w, h);
+    let z_max = m
+        .tiles
+        .records()
+        .iter()
+        .map(|t| t.z as usize)
+        .max()
+        .unwrap_or(0);
+    let expect_w = (30 * (xmy_max - xmy_min) + 60) as u32;
+    let expect_h = (15 * (d_max - d_min) + 30 + 15 * z_max as i64) as u32;
+    let png = std::fs::read(&out_path).expect("PNG 落盘");
+    assert_eq!(png[..8], *b"\x89PNG\r\n\x1a\n", "PNG 签名");
+    assert_eq!(png[12..16], *b"IHDR");
+    assert_eq!(png[16..20], expect_w.to_be_bytes(), "IHDR 宽");
+    assert_eq!(png[20..24], expect_h.to_be_bytes(), "IHDR 高");
+    assert!(
+        distinct_colors(&decode_store_idat(&png), expect_w) >= 2,
+        "像素多值(非占位非单色)"
+    );
+}
+
+/// rulesmd.ini 缺席(ra2md.mix 无该名)→ 退化非失败(brief §Step 1):
+/// exit 0、stderr 提示退化、同一非空 overlay 格计 no_type(对照成功测试
+/// 的落绘 1);artmd/art.ini 缺席为静默缺省(stderr 无 artmd 字样),
+/// CABHUT 缺省名无档计缺素材、TIBTRE01 照落绘。
+#[test]
+fn render_missing_rules_degrades() {
+    let map_bytes = mini_map_with(&[(3, 2, 0, 0)]);
+    let dir = temp_dir("render-norules");
+    let p = dir.join("t.map");
+    std::fs::write(&p, &map_bytes).unwrap();
+    let assets_dir = scene_assets("render-norules", false);
+    let out_path = dir.join("scene.png");
+    let out = Command::new(bin())
+        .args([
+            "render",
+            p.to_str().unwrap(),
+            "-o",
+            out_path.to_str().unwrap(),
+            "--assets",
+            assets_dir.to_str().unwrap(),
+        ])
+        .env_remove("RA2_ASSETS_DIR")
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("资产缺 rulesmd.ini"), "退化提示: {stderr}");
+    assert!(
+        stderr.contains("overlay 1 = 落绘 0 + 越表 1"),
+        "非空格全 no_type: {stderr}"
+    );
+    assert!(
+        stderr.contains("物件 2 = 落绘 1 + voxel跳过 0 + 缺素材 1"),
+        "物件段(缺省名): {stderr}"
+    );
+    assert!(!stderr.contains("artmd"), "art 缺席不提示: {stderr}");
+    assert!(out_path.exists(), "退化路径仍产出 PNG");
 }
