@@ -165,9 +165,9 @@ mod tests {
         b
     }
 
-    /// N 帧 60×30 RAW SHP(裸 RAW 判别:span==cx·cy;均匀/近均匀填充的
-    /// 严格 RLE 链 `257·v·k = 1800` 无整数解 → RLE 必败走 RAW,shp_ts.rs
-    /// 判别式先严格 RLE)。帧体按声明顺序背靠背排列。
+    /// N 帧 60×30 RAW SHP:flags=1,bit1=0 → 帧级门控直取 RAW(draw.cpp:88-98
+    /// Bit_Blit,M4c 判别式)。均匀填充的严格 RLE 链 `257·v·k = 1800` 无整数
+    /// 解,任何判别式下均不被误读为 RLE。帧体按声明顺序背靠背排列。
     fn shp_raw(bodies: &[Vec<u8>]) -> Vec<u8> {
         assert!(!bodies.is_empty());
         let mut v = Vec::new();
@@ -182,7 +182,7 @@ mod tests {
             v.extend_from_slice(&0i16.to_le_bytes()); // y
             v.extend_from_slice(&60u16.to_le_bytes()); // cx
             v.extend_from_slice(&30u16.to_le_bytes()); // cy
-            v.extend_from_slice(&3u32.to_le_bytes()); // flags
+            v.extend_from_slice(&1u32.to_le_bytes()); // flags=1:bit1=0 → RAW
             v.extend_from_slice(&[0u8; 4]); // rgba
             v.extend_from_slice(&0u32.to_le_bytes()); // reserved
             v.extend_from_slice(&((table_end + 1800 * i) as u32).to_le_bytes());

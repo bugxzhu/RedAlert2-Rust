@@ -602,7 +602,8 @@ fn palette768() -> Vec<u8> {
 }
 
 /// N 帧 W×H RAW SHP(objects.rs tests 同款):帧 i 整帧 = fills[i]。
-/// 均匀填充严格 RLE 必败 → 恒走 RAW 兜底(shp_ts.rs 判别式)。
+/// flags=1,bit1=0 → 帧级门控直取 RAW(M4c 判别式);均匀填充的严格
+/// RLE 链无整数解,任何判别式下均不被误读为 RLE。
 fn shp_frames(cx: u16, cy: u16, fills: &[u8]) -> Vec<u8> {
     assert!(!fills.is_empty());
     let span = cx as usize * cy as usize;
@@ -617,7 +618,7 @@ fn shp_frames(cx: u16, cy: u16, fills: &[u8]) -> Vec<u8> {
         v.extend_from_slice(&0i16.to_le_bytes()); // y
         v.extend_from_slice(&cx.to_le_bytes());
         v.extend_from_slice(&cy.to_le_bytes());
-        v.extend_from_slice(&3u32.to_le_bytes()); // flags
+        v.extend_from_slice(&1u32.to_le_bytes()); // flags=1:bit1=0 → RAW
         v.extend_from_slice(&[0u8; 4]); // rgba
         v.extend_from_slice(&0u32.to_le_bytes()); // reserved
         v.extend_from_slice(&((table_end + span * i) as u32).to_le_bytes());
