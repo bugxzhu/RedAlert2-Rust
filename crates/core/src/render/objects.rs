@@ -78,7 +78,15 @@ pub(crate) fn paint_objects(
             u16::try_from(x.saturating_add(1)).unwrap_or(u16::MAX),
             u16::try_from(y.saturating_add(1)).unwrap_or(u16::MAX),
         );
-        let z = map.tiles.cell(wx, wy).map_or(0u8, |t| t.z);
+        // z 缺席格(物件格在走位域外/虚空)记 0 兜底并计侧账(信息位,
+        // 不入守恒恒等式;语料 9,288 件/807 图,研究 §4.7)。
+        let z = match map.tiles.cell(wx, wy) {
+            Some(t) => t.z,
+            None => {
+                stats.objects_z_fallback += 1;
+                0
+            }
+        };
         let d = i64::from(wx) + i64::from(wy);
         let xmy = i64::from(wx) - i64::from(wy);
         let cx = CELL_DX as i64 * (xmy - xmy_min) + CELL_DX as i64;
@@ -768,6 +776,51 @@ mod tests {
             "GOODTREE 1×1 恰覆树锚 (30,33)"
         );
         assert_eq!(px(&rgb, cw, 30, 45), c8(9), "格中心无落笔(树锚在 C−12)");
+        assert_conservation(&map, &stats);
+    }
+
+    /// objects_z_fallback 侧账(信息位,不入守恒恒等式):物件落格在走位
+    /// 域外(tiles.cell 缺席)→ 计数;域内格 → 不计数。Structure 0 基 (0,0)
+    /// → cell()=(0,0) → 查档格 (1,1) 在 2×2 走位域 (2,1),(1,2),(2,2),
+    /// (3,2),(2,3),(3,3) 外 → fallback +1;树 key 2001 → 0 基 (1,2) → 查档
+    /// 格 (2,3) 域内 → 不计。域外件链路成功(Outside 亦计 drawn,clip +1)。
+    #[test]
+    fn z_fallback_counts_objects_off_walk_domain() {
+        let pal = test_palette();
+        let assets = tiny_assets(
+            "zfall",
+            &[
+                ("tst01.sno", tmp60(9)),
+                ("tstbldg.shp", shp1(1, 1, 50)),
+                ("goodtree.shp", shp1(1, 1, 60)),
+            ],
+        );
+        let sections = "[Structures]\n\
+                        0=Neutral,TSTBLDG,256,0,0,0,None,0,0,1,0,0,None,None,None,0,0\n\
+                        [Terrain]\n2001=GOODTREE\n";
+        let (map, rgb, cw, ch, d_min, xmy_min, z_max, ext) =
+            stage(2, 2, &[], sections, &assets, &pal);
+        let mut rgb = rgb;
+        let mut stats = SceneStats::default();
+        let mut cache = ShpCache::new();
+        paint_objects(
+            &map,
+            &assets,
+            &ArtIndex::parse("", ""),
+            &pal,
+            d_min,
+            xmy_min,
+            z_max,
+            ext,
+            &mut rgb,
+            cw,
+            ch,
+            &mut stats,
+            &mut cache,
+        );
+        assert_eq!(stats.objects_z_fallback, 1, "仅域外建筑计 z 缺席");
+        assert_eq!(stats.objects_drawn, 2, "两件链路成功(域外件 Outside 亦计)");
+        assert_eq!(stats.clip, 1, "域外件出画布计 clip");
         assert_conservation(&map, &stats);
     }
 }

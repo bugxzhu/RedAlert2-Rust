@@ -78,6 +78,9 @@ pub struct SceneStats {
     pub frame_clamp: usize,
     /// 精灵矩形未全入画布(信息位)。
     pub clip: usize,
+    /// 物件格走位域外/虚空,z 缺席记 0 的侧账(信息位,不入守恒恒等式;
+    /// 语料 9,288 件/807 图,研究 §4.7)。overlay 无此面(其 z 来自记录本体)。
+    pub objects_z_fallback: usize,
 }
 
 /// SHP 名 → 解析结果缓存(每图一份;Missing/Fail 负缓存防重复查档)。
