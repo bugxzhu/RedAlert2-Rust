@@ -97,6 +97,17 @@ pub(crate) fn load_shp<'a>(
     &cache[&key]
 }
 
+/// 阴影半帧号惯例:SHP 后半 = 阴影半,阴影帧 = 本体帧 + 帧数/2
+/// (cell.cpp:1393 Draw_Overlay_Shadow `frame + Get_Count()/2`;
+/// terrain.cpp:282-283 同式;跨类型惯例 builtype.cpp:771-802)。
+/// M4c 只钉语义不接线(变暗 DARKEN 表未钉顺延,研究 §9 L7);渲染路径
+/// 不调用,为阴影批铺接口。
+#[allow(dead_code)] // 旗标化:渲染接线顺延(DARKEN 表未钉,研究 §9 L7)
+pub(crate) fn shadow_frame_index(frame: usize, frame_count: usize) -> Option<usize> {
+    let idx = frame + frame_count / 2;
+    (idx < frame_count).then_some(idx)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -202,5 +213,21 @@ mod tests {
             blit_frame(&mut rgb, 8, 4, &f, &f.frames[0], (20, 1), &pal()),
             BlitResult::Outside
         ));
+    }
+
+    /// 阴影帧号规则(spec §4,纯函数渲染不接线):偶数帧数 0 → n/2;
+    /// 奇数 floor(n/2);越界(含零帧数)None。
+    /// 引擎出处:cell.cpp:1393 `frame + Get_Count()/2`;terrain.cpp:282-283
+    /// 同式;跨类型惯例 builtype.cpp:771-802。
+    #[test]
+    fn shadow_frame_index_half_offset() {
+        assert_eq!(shadow_frame_index(0, 4), Some(2), "偶数帧数:0 → n/2");
+        assert_eq!(shadow_frame_index(1, 4), Some(3));
+        assert_eq!(shadow_frame_index(2, 4), None, "2+2 ≥ 4 → 越界 None");
+        assert_eq!(shadow_frame_index(3, 4), None);
+        assert_eq!(shadow_frame_index(0, 5), Some(2), "奇数帧数:floor(n/2)");
+        assert_eq!(shadow_frame_index(2, 5), Some(4));
+        assert_eq!(shadow_frame_index(3, 5), None);
+        assert_eq!(shadow_frame_index(0, 0), None, "零帧数防御");
     }
 }
