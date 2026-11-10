@@ -5,7 +5,7 @@
 //! 变体(cell.cpp:1451),crate 帧特判 0(cell.cpp:1382),桥面板帧 0/9
 //! 加 16 项变体表(cell.cpp:1422-1427),帧号 = OverlayData 直传;锚 =
 //! 格中心 C(overtype.cpp:167)。桥 NS 偏移 (−15,7) 与桥高 z 附加
-//! (cell.cpp:1408/1372-1376)不感知 → M4c(spec §8 低置信清单)。
+//! (cell.cpp:1408/1372-1376)不感知 → 后续里程碑待钉。
 //! VEIN 前缀表项守卫跳画(cell.cpp:1401-1403,M4c spec §2;计 drawn
 //! 与 Outside 同口径)。
 

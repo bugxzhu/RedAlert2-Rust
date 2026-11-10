@@ -2,7 +2,7 @@
 
 //! 物件 pass(M4b spec §5;研究 §1/§3/§4):三类 SHP 物件(树/建筑/
 //! 步兵)按引擎 Sort_Y 升序稳定绘制;Unit/Aircraft = voxel 计数跳过
-//! (用户裁决 2026-11-06,M4c);Smudge 顺延不计。锚定/朝向公式出处见
+//! (用户裁决 2026-11-09 → M5);Smudge 顺延不计。锚定/朝向公式出处见
 //! 研究文档;建筑 in-game Draw_IT 未反编译 → Editor 路径锚定(L1)。
 
 use crate::format::art::ArtIndex;
@@ -46,7 +46,7 @@ pub(crate) fn paint_objects(
             ObjectClass::Unit | ObjectClass::Aircraft => {
                 stats.objects_skipped_voxel += 1;
             }
-            ObjectClass::Smudge => {} // M4c;不入桶不入守恒
+            ObjectClass::Smudge => {} // 后续批(Smudge 分支语料 0);不入桶不入守恒
             ObjectClass::Terrain | ObjectClass::Structure | ObjectClass::Infantry => {
                 if o.malformed || o.cell().is_none() || o.kind().is_none() {
                     stats.objects_malformed += 1;
