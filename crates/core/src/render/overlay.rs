@@ -6,6 +6,8 @@
 //! 加 16 项变体表(cell.cpp:1422-1427),帧号 = OverlayData 直传;锚 =
 //! 格中心 C(overtype.cpp:167)。桥 NS 偏移 (−15,7) 与桥高 z 附加
 //! (cell.cpp:1408/1372-1376)不感知 → M4c(spec §8 低置信清单)。
+//! VEIN 前缀表项守卫跳画(cell.cpp:1401-1403,M4c spec §2;计 drawn
+//! 与 Outside 同口径)。
 
 use crate::format::map::iso::IsoTile;
 use crate::format::map::MapFile;
@@ -49,6 +51,16 @@ pub(crate) fn paint_overlays(
             stats.overlay_no_type += 1;
             continue;
         };
+        // VEIN 前缀守卫(cell.cpp:1401-1403 VEINHOLE/VEINHOLE_DUMMY 直接
+        // return):不画、不计失败,计 overlay_drawn(链路成功、像素面空,
+        // 与 BlitResult::Outside 同口径)。守卫先于查档(缺档不入
+        // missing/fail)。零售 [OverlayTypes] 唯一 VEIN 名 = 表位 178
+        // VEINHOLEDUMMY,语料命中 0 格(研究 §4.5)——纯语义对齐,不改
+        // 807 总账;rubble 分支语料 0,只记语义不实现(spec §2)。
+        if kind.image.starts_with("VEIN") {
+            stats.overlay_drawn += 1;
+            continue;
+        }
         let mut frame = if kind.is_crate {
             0
         } else {
@@ -524,5 +536,57 @@ mod tests {
         assert_eq!(px(91, 31), c8(6), "桥变体表 +1 → 帧 1 色 6");
         // (c) gasand:data 9 越单帧界 → 钳帧 0(色 7;不钳则帧 9 越索引)
         assert_eq!(px(151, 45), c8(7), "data=9 钳末帧(唯一帧)色 7");
+    }
+
+    /// VEIN 前缀守卫(cell.cpp:1401-1403):表项名 VEIN* 不画、不计失败,
+    /// 计 overlay_drawn(链路成功像素面空,与 Outside 同口径);守卫先于
+    /// 查档——资产刻意不提供 VEINHOLEDUMMY.shp,缺档不得入 missing/fail;
+    /// 画布零写入(格中心保持地形色)。零售 [OverlayTypes] 唯一 VEIN 名 =
+    /// 表位 178 VEINHOLEDUMMY,语料命中 0 格(研究 §4.5),纯语义对齐。
+    #[test]
+    fn vein_prefixed_overlay_skips_paint() {
+        let pal = test_palette();
+        let assets = tiny_assets("vein", &[("tst01.sno", tmp60(9))]);
+        let map = overlay_map(
+            (2, 2),
+            &types_layer(&[(2, 2, 0)]),
+            &data_layer(&[(2, 2, 0)]),
+        );
+        let ext = theater_spec(map.map_meta.theater).ext;
+        let recs = sorted_records(2, 2);
+        let ter = compose_terrain(2, 2, &recs, &assets, &terrain_ini(), ext, &pal).unwrap();
+        let (cw, ch) = (ter.width as usize, ter.height as usize);
+        let mut rgb = ter.rgb;
+        let (d_min, _, xmy_min, _) = walk_extremes(2, 2);
+        let mut stats = SceneStats::default();
+        let mut cache = ShpCache::new();
+        paint_overlays(
+            &map,
+            &assets,
+            &OverlayTable::parse("[OverlayTypes]\n0=VEINHOLEDUMMY\n"),
+            &pal,
+            &recs,
+            d_min,
+            xmy_min,
+            0,
+            ext,
+            &mut rgb,
+            cw,
+            ch,
+            &mut stats,
+            &mut cache,
+        );
+        assert_eq!(stats.overlay_drawn, 1, "守卫命中计 drawn(不画)");
+        assert_eq!(
+            stats.overlay_no_type + stats.overlay_missing_file + stats.overlay_fail,
+            0,
+            "守卫先于查档:无 no_type/missing/fail"
+        );
+        assert_conservation(&map, &recs, &stats);
+        let px = |x: usize, y: usize| -> [u8; 3] {
+            let i = 3 * (y * cw + x);
+            [rgb[i], rgb[i + 1], rgb[i + 2]]
+        };
+        assert_eq!(px(60, 30), c8(9), "画布零写入(格中心保持地形色)");
     }
 }
